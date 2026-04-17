@@ -42,19 +42,14 @@ public class Profile {
     @Column(name = "cover_key", length = 500)
     private String coverKey;
 
-    /** S3 object key for a thumbnail. Mutually exclusive with thumbnailUrl (DB constraint). */
-    @Column(name = "thumbnail_key", length = 255)
-    private String thumbnailKey;
-
     // V9 additions
 
     /** External (OAuth provider) avatar URL — set when user has a Google/social avatar. */
     @Column(name = "profile_image_url", length = 500)
     private String profileImageUrl;
 
-    /** External (OAuth provider) thumbnail URL. Mutually exclusive with thumbnailKey. */
-    @Column(name = "thumbnail_url", length = 500)
-    private String thumbnailUrl;
+    // thumbnail_key and thumbnail_url columns remain in DB but are unmapped until
+    // image processing (resize/EXIF strip) is added in a later prompt.
 
     @Column(name = "location", length = 128)
     private String location;

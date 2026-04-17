@@ -37,16 +37,9 @@ public class ProfileUpdateRequest {
     @Size(max = 500)
     private String coverKey;
 
-    // thumbnailKey: stored directly (S3 promotion deferred to Prompt 5)
-    @Size(max = 255)
-    private String thumbnailKey;
-
-    // External OAuth avatar URLs (e.g. Google profile photo). Mutually exclusive with avatarKey/thumbnailKey.
+    // External OAuth avatar URL (e.g. Google profile photo). Mutually exclusive with avatarKey.
     @Size(max = 500)
     private String profileImageUrl;
-
-    @Size(max = 500)
-    private String thumbnailUrl;
 
     @Size(max = 128)
     private String location;

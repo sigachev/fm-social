@@ -17,7 +17,6 @@ public record ProfilePublicResponse(
         String firstName,
         String lastName,
         String avatarUrl,
-        String thumbnailUrl,
         String coverUrl,
         String bio,
         String location,

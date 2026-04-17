@@ -123,17 +123,10 @@ public class ProfileService {
         if (req.getFirstName() != null)                profile.setFirstName(req.getFirstName());
         if (req.getLastName() != null)                 profile.setLastName(req.getLastName());
         if (req.getNameDisplayPreference() != null)    profile.setNameDisplayPreference(req.getNameDisplayPreference());
-        // thumbnailKey: stored directly — S3 promotion deferred to Prompt 5 (same pattern as avatarKey)
-        if (req.getThumbnailKey() != null)             profile.setThumbnailKey(req.getThumbnailKey());
         // OAuth avatar URL: mutually exclusive with avatarKey (DB constraint avatar_key_exclusive)
         if (req.getProfileImageUrl() != null) {
             profile.setProfileImageUrl(req.getProfileImageUrl());
             profile.setAvatarKey(null); // enforce mutual exclusion
-        }
-        // OAuth thumbnail URL: mutually exclusive with thumbnailKey (DB constraint thumbnail_exclusive)
-        if (req.getThumbnailUrl() != null) {
-            profile.setThumbnailUrl(req.getThumbnailUrl());
-            profile.setThumbnailKey(null); // enforce mutual exclusion
         }
         if (req.getLocation() != null)                 profile.setLocation(req.getLocation());
         if (req.getWebsite() != null)                  profile.setWebsite(req.getWebsite());
@@ -167,14 +160,13 @@ public class ProfileService {
      * falls back to OAuth URL when the S3 key is absent.
      */
     public ProfileResponse toFullResponse(Profile p) {
-        String avatarUrl   = resolveAvatarUrl(p);
-        String coverUrl    = p.getCoverKey()    != null ? s3Service.createPresignedGet(p.getCoverKey())    : null;
-        String thumbnailUrl = resolveThumbnailUrl(p);
+        String avatarUrl = resolveAvatarUrl(p);
+        String coverUrl  = p.getCoverKey() != null ? s3Service.createPresignedGet(p.getCoverKey()) : null;
 
         return new ProfileResponse(
                 p.getUserId(), p.getBio(), p.getDisplayName(), p.getFirstName(), p.getLastName(),
                 p.getNameDisplayPreference(),
-                avatarUrl, coverUrl, thumbnailUrl,
+                avatarUrl, coverUrl,
                 p.getLocation(), p.getWebsite(), p.getTimezone(),
                 p.getTwitterHandle(), p.getDiscordHandle(), p.getTelegramHandle(),
                 p.getInstagramHandle(), p.getFacebookHandle(), p.getLinkedinHandle(), p.getWhatsappHandle(),
@@ -194,9 +186,8 @@ public class ProfileService {
     private ProfilePublicResponse toFilteredPublicResponse(Profile p,
                                                             boolean showAllFields,
                                                             boolean showSocialHandles) {
-        String avatarUrl    = resolveAvatarUrl(p);
-        String thumbnailUrl = resolveThumbnailUrl(p);
-        String coverUrl     = showAllFields && p.getCoverKey() != null
+        String avatarUrl = resolveAvatarUrl(p);
+        String coverUrl  = showAllFields && p.getCoverKey() != null
                 ? s3Service.createPresignedGet(p.getCoverKey()) : null;
 
         return new ProfilePublicResponse(
@@ -205,7 +196,6 @@ public class ProfileService {
                 showAllFields && p.isShowRealName() ? p.getFirstName() : null,
                 showAllFields && p.isShowRealName() ? p.getLastName()  : null,
                 avatarUrl,
-                thumbnailUrl,
                 coverUrl,
                 showAllFields ? p.getBio() : null,
                 showAllFields && p.isShowLocation() ? p.getLocation() : null,
@@ -226,15 +216,9 @@ public class ProfileService {
         );
     }
 
-    /** S3 presigned URL if avatarKey is set; external OAuth URL otherwise; null if neither. */
+    /** Presigned S3 URL if avatarKey is set; external OAuth URL otherwise; null if neither. */
     private String resolveAvatarUrl(Profile p) {
         if (p.getAvatarKey() != null) return s3Service.createPresignedGet(p.getAvatarKey());
         return p.getProfileImageUrl();
-    }
-
-    /** S3 presigned URL if thumbnailKey is set; external OAuth thumbnail URL otherwise. */
-    private String resolveThumbnailUrl(Profile p) {
-        if (p.getThumbnailKey() != null) return s3Service.createPresignedGet(p.getThumbnailKey());
-        return p.getThumbnailUrl();
     }
 }

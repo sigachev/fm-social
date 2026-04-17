@@ -352,6 +352,8 @@ Asset symbols are always stored **uppercase**: `BTC`, `ETH`, `SOL`. Normalize on
 | WebClient timeout | 3-second timeout on all outbound calls — catch `TimeoutException` in service layer |
 | `comments_target_exclusive` CHECK | Enforced at DB level — POST/PORTFOLIO use `target_id`, ASSET uses `target_symbol` |
 | `reactions_unique` constraint | Toggle behavior: delete the row to "un-react"; re-insert to react again |
+| `PostResponse.authorUsername` may be null | Posts created before V11 migration have no `author_username` stored. Frontend falls back to `user_${authorId}` display when null. New posts always have it set from JWT `preferred_username`. |
+| `PublicProfileResponse.userId` added (2026-04-17) | Frontend needs `userId` from public profile to call `GET /api/posts/user/{userId}` in the Posts tab. Added as first field in the record; `ProfileService.buildPublicProfileResponse` passes `targetUserId`. |
 | Self-signed cert on `auth.finmates.com` | `SecurityConfig` defines a custom `@Bean JwtDecoder` with trust-all SSL, same pattern as `fm-admin`. Do NOT remove this override — Spring Boot's auto-configured decoder fails PKIX validation against the self-signed Keycloak cert. |
 | `FmSocialApplicationTests.contextLoads` fails in CI | Context-loads test can't connect to DB. Needs test profile with Testcontainers or `@MockBean` JPA. Jenkinsfile uses `-DskipTests` to bypass for now. |
 | `user_id` JWT claim required by all write endpoints | Standard Keycloak tokens lack `user_id`. All authenticated endpoints throw 403 until `finmates-main` adds the claim via a Keycloak token mapper (Prompt 5). |

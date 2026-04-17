@@ -1,0 +1,42 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://postgres:5432/social
+    username: ${DB_USERNAME:user}
+    password: ${DB_PASSWORD:Int6859351!}
+  data:
+    redis:
+      host: redis.dev.svc.cluster.local
+      port: 6379
+      password: ${REDIS_PASSWORD}
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: https://auth.finmates.com/realms/finmates/protocol/openid-connect/certs
+          issuer-uri: https://auth.finmates.com/realms/finmates
+
+finmates:
+  services:
+    main-url: http://finmates-main.dev.svc.cluster.local:8081
+    crypto-url: http://finmates-crypto.dev.svc.cluster.local:8087
+  internal:
+    shared-secret: ${INTERNAL_SHARED_SECRET}
+  feed:
+    max-entries-per-user: 1000
+    fanout-batch-size: 500
+    fanout-cold-threshold: 10000
+  edit-window-minutes: 5
+  post:
+    max-content-length: 1200
+    max-media-count: 10
+  comment:
+    max-content-length: 500
+  jwt:
+    principal-attribute: preferred_username
+    resource-id: finmates-app
+
+logging:
+  level:
+    com.finmates.social: INFO
+    org.springframework.security: WARN
+    org.hibernate.SQL: WARN

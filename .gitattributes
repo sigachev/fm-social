@@ -1,0 +1,26 @@
+# Normalize line endings on checkout
+* text=auto
+
+# Force LF for shell scripts and Maven wrapper
+mvnw text eol=lf
+*.sh text eol=lf
+
+# Force CRLF for Windows batch files
+mvnw.cmd text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary files — no line-ending conversion
+*.jar binary
+*.war binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.zip binary
+*.gz binary
+*.tar binary
+
+# SQL files — no autocrlf (Flyway is sensitive to encoding)
+*.sql text eol=lf

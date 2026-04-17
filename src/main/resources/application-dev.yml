@@ -1,0 +1,36 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://finmates.com:5432/social
+    username: ${DB_USERNAME:user}
+    password: ${DB_PASSWORD:Int6859351!}
+  data:
+    redis:
+      host: ${REDIS_HOST:finmates.com}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD}
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: https://auth.finmates.com/realms/finmates/protocol/openid-connect/certs
+          issuer-uri: https://auth.finmates.com/realms/finmates
+
+finmates:
+  services:
+    main-url: http://localhost:8081
+    crypto-url: http://localhost:8087
+  internal:
+    shared-secret: ${INTERNAL_SHARED_SECRET:dev-local-secret-do-not-use-in-prod}
+  feed:
+    max-entries-per-user: 1000
+    fanout-batch-size: 500
+    fanout-cold-threshold: 10000
+  edit-window-minutes: 5
+  post:
+    max-content-length: 1200
+    max-media-count: 10
+  comment:
+    max-content-length: 500
+  jwt:
+    principal-attribute: preferred_username
+    resource-id: finmates-app

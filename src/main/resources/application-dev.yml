@@ -20,7 +20,7 @@ finmates:
     main-url: http://localhost:8081
     crypto-url: http://localhost:8087
   internal:
-    shared-secret: ${INTERNAL_SHARED_SECRET:dev-local-secret-do-not-use-in-prod}
+    shared-secret: ${INTERNAL_SHARED_SECRET:dev-local-secret}
   feed:
     max-entries-per-user: 1000
     fanout-batch-size: 500

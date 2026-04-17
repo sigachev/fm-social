@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     environment {
-        DEPLOYMENT_NAME = "fm-social"
+        DEPLOYMENT_NAME = "social"
 
         DOCKER_IMAGE             = "fm-social"
         K8S_NAMESPACE            = "dev"

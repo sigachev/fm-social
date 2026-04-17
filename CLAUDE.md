@@ -275,6 +275,18 @@ Asset symbols are always stored **uppercase**: `BTC`, `ETH`, `SOL`. Normalize on
 - **K8s manifests:** `k8s/deployment.yaml`, `k8s/service.yaml`, `k8s/ingress.yaml` (created 2026-04-16)
 - **Redis password:** `application-k8s.yml` has `REPLACE_AT_BUILD` placeholder — must be replaced with the value from K8s Secret `redis-auth` before first deploy
 
+### K8s Resource Names (asymmetric by design)
+
+| Resource | Name | Notes |
+|----------|------|-------|
+| Deployment | `social` | `kubectl rollout restart deployment/social -n dev` |
+| Service | `social` | Internal cluster URL: `http://social.dev.svc.cluster.local` |
+| Ingress | `social-ingress` | Distinguished from Service of the same bare name |
+
+Public URL: `https://social.finmates.com`  
+The Ingress backend still points to Service `social` (port 80) — the `social-ingress` name is for
+the Ingress resource itself only.
+
 ## Persistent Context (claude-mem)
 
 Cross-session memory via the `claude-mem` MCP plugin.

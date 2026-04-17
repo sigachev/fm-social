@@ -1,14 +1,14 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: fm-social
+  name: social
   namespace: dev
   labels:
-    app: fm-social
+    app: social
 spec:
   type: ClusterIP
   selector:
-    app: fm-social
+    app: social
   ports:
     - protocol: TCP
       port: 80

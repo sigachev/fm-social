@@ -5,11 +5,15 @@ credentials hardcoded in `application-k8s.yml`, one secret injected from K8s).
 
 ## Files
 
-| File | Purpose |
-|------|---------|
-| `deployment.yaml` | Deployment — 1 replica, port 80, RollingUpdate 25/25 |
-| `service.yaml` | ClusterIP service on port 80 |
-| `ingress.yaml` | nginx ingress at `fm-social.finmates.com` |
+| File | Purpose | Resource name |
+|------|---------|---------------|
+| `deployment.yaml` | Deployment — 1 replica, port 80, RollingUpdate 25/25 | `social` |
+| `service.yaml` | ClusterIP service on port 80 | `social` |
+| `ingress.yaml` | nginx ingress at `fm-social.finmates.com` | `social-ingress` |
+
+Note: the Ingress is named `social-ingress` (to distinguish ingress resources from same-named
+services/deployments in `kubectl get all`). The Deployment and Service are both named `social`.
+The backend service reference inside ingress.yaml points to the Service `social` — this is correct.
 
 ## Apply Order
 
@@ -30,8 +34,8 @@ kubectl apply -f k8s/ -n dev
 ```bash
 # Full redeploy (image already pushed to Nexus)
 kubectl apply -f k8s/ -n dev
-kubectl rollout restart deployment/fm-social -n dev
-kubectl rollout status deployment/fm-social -n dev
+kubectl rollout restart deployment/social -n dev
+kubectl rollout status deployment/social -n dev
 ```
 
 ## URLs

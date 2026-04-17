@@ -3,7 +3,7 @@
 Unified social microservice for FinMates. Handles posts, polymorphic comments, crypto-native
 reactions, profile presentation, follow graph, blocks, moderation, and content reports.
 
-**Port:** 8091
+**Port:** 8091 
 
 ## Prerequisites
 

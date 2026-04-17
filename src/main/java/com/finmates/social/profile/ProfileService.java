@@ -1,11 +1,17 @@
 package com.finmates.social.profile;
 
+import com.finmates.social.block.BlockRepository;
+import com.finmates.social.client.PortfolioSummaryResponse;
+import com.finmates.social.client.UserLookupCache;
 import com.finmates.social.common.exception.ForbiddenActionException;
 import com.finmates.social.common.exception.ResourceNotFoundException;
 import com.finmates.social.follow.FollowRepository;
+import com.finmates.social.post.PostRepository;
+import com.finmates.social.post.PostStatus;
 import com.finmates.social.profile.dto.ProfilePublicResponse;
 import com.finmates.social.profile.dto.ProfileResponse;
 import com.finmates.social.profile.dto.ProfileUpdateRequest;
+import com.finmates.social.profile.dto.PublicProfileResponse;
 import com.finmates.social.upload.S3Service;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.CacheEvict;
@@ -15,6 +21,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.Optional;
+
 @Slf4j
 @Service
 @Transactional(readOnly = true)
@@ -22,13 +30,19 @@ public class ProfileService {
 
     private final ProfileRepository profileRepository;
     private final FollowRepository followRepository;
+    private final BlockRepository blockRepository;
+    private final PostRepository postRepository;
     private final S3Service s3Service;
 
     public ProfileService(ProfileRepository profileRepository,
                           FollowRepository followRepository,
+                          BlockRepository blockRepository,
+                          PostRepository postRepository,
                           S3Service s3Service) {
         this.profileRepository = profileRepository;
         this.followRepository = followRepository;
+        this.blockRepository = blockRepository;
+        this.postRepository = postRepository;
         this.s3Service = s3Service;
     }
 
@@ -214,6 +228,74 @@ public class ProfileService {
                 p.isShowTradeHistory(), p.isShowOnlineStatus(), p.isShowInLeaderboard(),
                 p.getCreatedAt()
         );
+    }
+
+    /**
+     * Builds the full public profile response including stats and user summary.
+     * Returns empty Optional if profile not found, is private (and viewer is not owner), or blocked.
+     *
+     * @param viewerId    viewer's userId — may be null for unauthenticated requests
+     * @param targetUserId the profile owner's userId
+     * @param userSummary auth-state summary resolved from finmates-main
+     */
+    public Optional<PublicProfileResponse> buildPublicProfileResponse(
+            Long viewerId,
+            Long targetUserId,
+            UserLookupCache.UserSummary userSummary) {
+
+        Optional<Profile> profileOpt = profileRepository.findById(targetUserId);
+        if (profileOpt.isEmpty()) return Optional.empty();
+        Profile profile = profileOpt.get();
+
+        // Privacy check — owner always passes
+        if (profile.getProfileVisibility() == ProfileVisibility.PRIVATE
+                && !targetUserId.equals(viewerId)) {
+            return Optional.empty();
+        }
+
+        // Block check (both directions)
+        if (viewerId != null && blockRepository.existsBlockInEitherDirection(viewerId, targetUserId)) {
+            return Optional.empty();
+        }
+
+        // Stats
+        long postsCount = postRepository.countByAuthorIdAndStatus(targetUserId, PostStatus.ACTIVE);
+        long followersCount = followRepository.countByFollowedId(targetUserId);
+        long followingCount = followRepository.countByFollowerId(targetUserId);
+
+        boolean isFollowing = viewerId != null
+                && followRepository.existsByFollowerIdAndFollowedId(viewerId, targetUserId);
+        boolean isBlocked = viewerId != null
+                && blockRepository.existsBlockInEitherDirection(viewerId, targetUserId);
+
+        String avatarUrl = resolveAvatarUrl(profile);
+        String coverUrl = profile.getCoverKey() != null
+                ? s3Service.createPresignedGet(profile.getCoverKey()) : null;
+
+        String displayName = resolveDisplayName(profile);
+
+        return Optional.of(new PublicProfileResponse(
+                userSummary.username(),
+                displayName,
+                profile.getBio(),
+                avatarUrl,
+                coverUrl,
+                new PublicProfileResponse.Stats(postsCount, followersCount, followingCount),
+                null,  // portfolio — not fetched here; requires separate crypto service call
+                userSummary.emailVerified(),
+                isFollowing,
+                isBlocked
+        ));
+    }
+
+    private String resolveDisplayName(Profile p) {
+        if (p.getDisplayName() != null && !p.getDisplayName().isBlank()) return p.getDisplayName();
+        if (p.getFirstName() != null) {
+            return p.getLastName() != null
+                    ? p.getFirstName() + " " + p.getLastName()
+                    : p.getFirstName();
+        }
+        return null;
     }
 
     /** Presigned S3 URL if avatarKey is set; external OAuth URL otherwise; null if neither. */

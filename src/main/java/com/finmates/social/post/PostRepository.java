@@ -12,6 +12,8 @@ public interface PostRepository extends JpaRepository<Post, Long> {
     @Query("SELECT p FROM Post p WHERE p.authorId = :authorId AND p.status = 'ACTIVE' ORDER BY p.createdAt DESC")
     Page<Post> findActiveByAuthorId(@Param("authorId") Long authorId, Pageable pageable);
 
+    long countByAuthorIdAndStatus(Long authorId, PostStatus status);
+
     @Modifying
     @Query("UPDATE Post p SET p.commentCount = p.commentCount + :delta WHERE p.id = :id")
     void adjustCommentCount(@Param("id") Long id, @Param("delta") int delta);

@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.List;
 import java.util.Optional;
 
 public interface FollowRepository extends JpaRepository<Follow, Long> {
@@ -23,6 +24,17 @@ public interface FollowRepository extends JpaRepository<Follow, Long> {
 
     @Query("SELECT f FROM Follow f WHERE f.followedId = :followedId ORDER BY f.createdAt DESC")
     Page<Follow> findByFollowedId(@Param("followedId") Long followedId, Pageable pageable);
+
+    /**
+     * Returns all IDs of users who follow the given user (followedId = target).
+     * Used for feed fan-out-on-write.
+     */
+    @Query("SELECT f.followerId FROM Follow f WHERE f.followedId = :followedId")
+    List<Long> findAllFollowerIds(@Param("followedId") Long followedId);
+
+    long countByFollowedId(Long followedId);
+
+    long countByFollowerId(Long followerId);
 
     @Modifying
     @Query("DELETE FROM Follow f WHERE f.followerId = :followerId AND f.followedId = :followedId")

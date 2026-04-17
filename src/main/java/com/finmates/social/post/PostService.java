@@ -6,6 +6,7 @@ import com.finmates.social.common.exception.ForbiddenActionException;
 import com.finmates.social.common.exception.ResourceNotFoundException;
 import com.finmates.social.edit.PostEdit;
 import com.finmates.social.edit.PostEditRepository;
+import com.finmates.social.feed.FeedService;
 import com.finmates.social.post.dto.PostCreateRequest;
 import com.finmates.social.post.dto.PostResponse;
 import com.finmates.social.post.dto.PostUpdateRequest;
@@ -30,16 +31,19 @@ public class PostService {
     private final PostRepository postRepository;
     private final PostEditRepository postEditRepository;
     private final S3Service s3Service;
+    private final FeedService feedService;
 
     @Value("${finmates.edit-window-minutes}")
     private int editWindowMinutes;
 
     public PostService(PostRepository postRepository,
                        PostEditRepository postEditRepository,
-                       S3Service s3Service) {
+                       S3Service s3Service,
+                       FeedService feedService) {
         this.postRepository = postRepository;
         this.postEditRepository = postEditRepository;
         this.s3Service = s3Service;
+        this.feedService = feedService;
     }
 
     @Transactional
@@ -91,6 +95,13 @@ public class PostService {
             for (String pendingKey : successfullyCopied) {
                 s3Service.delete(pendingKey);
             }
+        }
+
+        // Fan-out to follower feeds (best-effort — post is already saved)
+        try {
+            feedService.fanOutPost(post);
+        } catch (Exception e) {
+            log.error("Feed fan-out failed for post {}: {}", post.getId(), e.getMessage());
         }
 
         return toResponse(post);
@@ -155,6 +166,13 @@ public class PostService {
             throw new EditWindowExpiredException(
                     resourceName + " can only be edited within " + editWindowMinutes + " minutes of creation");
         }
+    }
+
+    /**
+     * Public alias used by FeedController to convert a Post fetched outside this service.
+     */
+    public PostResponse toPublicResponse(Post post) {
+        return toResponse(post);
     }
 
     /**

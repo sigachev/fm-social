@@ -1,14 +1,15 @@
 package com.finmates.social.profile;
 
+import com.finmates.social.client.UserLookupCache;
 import com.finmates.social.common.security.AuthenticatedUser;
 import com.finmates.social.profile.dto.ProfilePublicResponse;
 import com.finmates.social.profile.dto.ProfileResponse;
 import com.finmates.social.profile.dto.ProfileUpdateRequest;
+import com.finmates.social.profile.dto.PublicProfileResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -21,10 +22,14 @@ public class ProfileController {
 
     private final ProfileService profileService;
     private final AuthenticatedUser authenticatedUser;
+    private final UserLookupCache userLookupCache;
 
-    public ProfileController(ProfileService profileService, AuthenticatedUser authenticatedUser) {
+    public ProfileController(ProfileService profileService,
+                             AuthenticatedUser authenticatedUser,
+                             UserLookupCache userLookupCache) {
         this.profileService = profileService;
         this.authenticatedUser = authenticatedUser;
+        this.userLookupCache = userLookupCache;
     }
 
     @GetMapping("/me")
@@ -56,11 +61,42 @@ public class ProfileController {
 
     @GetMapping("/{username}/public")
     @PreAuthorize("permitAll()")
-    @Operation(summary = "Get public profile by username — no auth required (requires cross-service username resolution)")
-    @ApiResponse(responseCode = "501", description = "Not implemented — username resolution deferred to Prompt 5")
-    public ResponseEntity<Void> getPublicProfileByUsername(@PathVariable String username) {
-        // TODO Prompt 5: resolve username → userId via finmates-main /api/internal/users/by-username
-        // then call profileService.getPublicProfile(null, userId)
-        return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).build();
+    @Operation(summary = "Get public profile by username — no auth required")
+    @ApiResponse(responseCode = "200", description = "Public profile")
+    @ApiResponse(responseCode = "404", description = "User not found or profile is private")
+    @ApiResponse(responseCode = "503", description = "User identity service unavailable")
+    public ResponseEntity<PublicProfileResponse> getPublicProfileByUsername(
+            @PathVariable String username) {
+
+        // Viewer may be unauthenticated — extract userId gracefully
+        Long viewerId = null;
+        try {
+            viewerId = authenticatedUser.currentUserId();
+        } catch (Exception ignored) {
+            // unauthenticated request — viewerId remains null
+        }
+
+        // Resolve username → userId via finmates-main (cached, 5-min TTL)
+        // NOTE: requires GET /api/internal/users/by-username/{username}/summary in finmates-main.
+        // Returns empty Optional gracefully if main is down.
+        java.util.Optional<UserLookupCache.UserSummary> userSummaryOpt =
+                userLookupCache.getByUsername(username);
+
+        if (userSummaryOpt.isEmpty()) {
+            // Main service unreachable or user not found — return 404
+            return ResponseEntity.notFound().build();
+        }
+
+        UserLookupCache.UserSummary userSummary = userSummaryOpt.get();
+
+        if (!userSummary.isActive()) {
+            return ResponseEntity.notFound().build();
+        }
+
+        Long targetUserId = userSummary.userId();
+
+        return profileService.buildPublicProfileResponse(viewerId, targetUserId, userSummary)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
     }
 }

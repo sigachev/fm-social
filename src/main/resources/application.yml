@@ -26,6 +26,8 @@ spring:
           max-active: 16
           max-idle: 8
           min-idle: 2
+      repositories:
+        enabled: false
 
 server:
   port: ${SERVER_PORT:8091}

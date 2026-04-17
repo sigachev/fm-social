@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: fm-social
+  namespace: dev
+  labels:
+    app: fm-social
+spec:
+  type: ClusterIP
+  selector:
+    app: fm-social
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+      name: http

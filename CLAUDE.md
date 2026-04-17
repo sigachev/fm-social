@@ -94,6 +94,7 @@ OpenAPI JSON: `http://localhost:8091/v3/api-docs`
 | `post_edits` | V8 | Post edit history (previous content) |
 | `comment_edits` | V8 | Comment edit history (previous content) |
 | `profiles` (extended) | V9 | Added privacy columns, OAuth avatar keys, name display preference |
+| `profiles` (columns renamed) | V10 | `profile_image_key` → `avatar_key VARCHAR(500)`, `cover_image_key` → `cover_key VARCHAR(500)` |
 
 ## Implemented REST Endpoints (Prompt 3 — 2026-04-16)
 
@@ -167,13 +168,106 @@ This is expected behavior.
 **Resolution (Prompt 5):** Add a Keycloak token mapper (or implement user ID resolution from the
 JWT `sub` claim via a call to `finmates-main /api/internal/users/by-keycloak-id/{sub}`).
 
+## S3 Media Integration (Prompt 4 — 2026-04-17)
+
+### Bucket & folder structure
+
+```
+finmates-media  (us-east-1)
+├── posts/_pending/user{id}/{uuid}.{ext}     ← initial client upload (presigned PUT)
+├── posts/{postId}/{uuid}.{ext}              ← after post creation (copy from _pending)
+├── users/{id}/profile/_pending/user{id}/{uuid}.{ext}  ← initial avatar upload
+├── users/{id}/profile/{uuid}.{ext}          ← after profile update
+├── users/{id}/cover/_pending/user{id}/{uuid}.{ext}    ← initial cover upload
+└── users/{id}/cover/{uuid}.{ext}            ← after profile update
+```
+
+S3 lifecycle rule auto-deletes anything under `_pending/` after 1 day (safety net).
+
+### Upload flow
+
+1. Client → `POST /api/uploads/presign` (or `/presign/avatar`, `/presign/cover`) — gets presigned PUT URL
+2. Client → PUT directly to S3 using presigned URL (fm-social never touches the bytes)
+3. Client → `POST /api/posts` with `mediaKeys: ["posts/_pending/user42/uuid.jpg"]`
+4. fm-social validates ownership → checks S3 existence → saves Post → copies to final path → updates Post → deletes `_pending/` copy
+
+### Key S3 classes
+
+| Class | Package | Purpose |
+|-------|---------|---------|
+| `S3Config` | `config` | `@Bean S3Client` + `@Bean S3Presigner` via `DefaultCredentialsProvider` |
+| `S3Service` | `upload` | All S3 ops: `createPresignedPut`, `createPresignedGet`, `objectExists`, `copy`, `delete`, `validateOwnership` |
+| `UploadController` | `upload` | `POST /api/uploads/presign` (batch), `/presign/avatar`, `/presign/cover`; Caffeine rate limiter |
+| `PendingUploadsCleanupJob` | `upload` | `@Scheduled` 3 AM daily — observability only (counts stale objects, does NOT delete) |
+
+### Raw S3 keys are never exposed in API responses
+
+All response DTOs expose presigned GET URLs only (1h TTL, regenerated per request):
+- `PostResponse.mediaUrls` — presigned GET URLs (was `mediaKeys`)
+- `ProfileResponse.avatarUrl` — presigned S3 URL or OAuth avatar URL (was `profileImageKey`)
+- `ProfileResponse.coverUrl` — presigned S3 URL (was `coverImageKey`)
+- `ProfileResponse.thumbnailUrl` — presigned S3 URL or OAuth thumbnail URL
+
+### Column renames (V10 migration)
+
+`profiles.profile_image_key` → `avatar_key VARCHAR(500)` (same data, renamed for clarity)
+`profiles.cover_image_key` → `cover_key VARCHAR(500)` (same data, renamed)
+The V9 CHECK constraint `profile_image_exclusive` was dropped and recreated as `avatar_key_exclusive`.
+`posts.media_keys` was already present from V1 — no change.
+
+### Mutual exclusion (avatar S3 vs OAuth URL)
+
+DB constraint `avatar_key_exclusive`: `CHECK (avatar_key IS NULL OR profile_image_url IS NULL)`.
+- Setting `avatarKey` via S3 promotion automatically NULLs `profileImageUrl` in ProfileService.
+- Setting `profileImageUrl` (OAuth) automatically NULLs `avatarKey` in ProfileService.applyUpdates.
+
+### Local dev AWS setup
+
+Add to IntelliJ run config or shell env:
+```
+AWS_ACCESS_KEY_ID=<your key>
+AWS_SECRET_ACCESS_KEY=<your secret>
+AWS_REGION=us-east-1
+S3_BUCKET=finmates-media
+```
+**Never commit AWS credentials.** Without these, the context starts fine but any S3 call (presign, copy, exists) will fail with an `SdkClientException`.
+
+### K8s AWS setup
+
+Secret: `fm-aws-credentials` (namespace `dev`)
+Keys: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`
+The secret is shared across services — fm-messaging and fm-notifications will use the same secret.
+`deployment.yaml` injects all three keys plus `S3_BUCKET=finmates-media`.
+
+### Rate limiting
+
+`UploadController` uses a Caffeine cache (in-memory, not Redis) to rate-limit presign requests:
+- Per-user counter, expires 1 minute after first request in the window
+- Limit: 30 requests/min (configurable via `fm-social.s3.presign-rate-limit-per-minute`)
+- Over-limit returns `HTTP 429` with `Retry-After: 60` header
+
+### Endpoints added (Prompt 4)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/uploads/presign` | Batch presign PUT URLs for post/comment media (1–10 files) |
+| POST | `/api/uploads/presign/avatar` | Single presign PUT URL for avatar upload |
+| POST | `/api/uploads/presign/cover` | Single presign PUT URL for cover image upload |
+
+### TODOs deferred to Prompt 5
+
+- `thumbnailKey` in `ProfileUpdateRequest` is stored directly without S3 ownership validation or promotion. Full treatment (presign endpoint + promotion flow) deferred.
+- `PATCH` rename: `ProfileUpdateRequest.profileImageKey` → `avatarKey`, `coverImageKey` → `coverKey`. Frontend must use the new field names.
+
+---
+
 ## Deferred Features (future prompts)
 
 | Feature | Prompt | Status |
 |---------|--------|--------|
-| S3 media upload/download | Prompt 4 | Not started |
 | Feed fan-out (Redis sorted sets) | Prompt 5 | Not started |
 | Username→userId cross-service resolution (`/api/profiles/{username}/public`) | Prompt 5 | Stub returns 501 |
+| thumbnailKey S3 promotion (upload endpoint + copy-on-update) | Prompt 5 | TODO |
 | Moderation endpoints (admin) | Prompt 6 | Entities/migrations exist, no controllers |
 | Frontend wiring | Prompt 7 | Not started |
 

@@ -30,6 +30,23 @@ spec:
                 secretKeyRef:
                   name: fm-internal-secret
                   key: internal-shared-secret
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: fm-aws-credentials
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fm-aws-credentials
+                  key: AWS_SECRET_ACCESS_KEY
+            - name: AWS_REGION
+              valueFrom:
+                secretKeyRef:
+                  name: fm-aws-credentials
+                  key: AWS_REGION
+            - name: S3_BUCKET
+              value: "finmates-media"
           resources:
             limits:
               cpu: '1'

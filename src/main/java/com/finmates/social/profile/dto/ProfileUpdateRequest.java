@@ -29,17 +29,19 @@ public class ProfileUpdateRequest {
 
     private NameDisplayPreference nameDisplayPreference;
 
-    // S3 keys — deferred to Prompt 4 (S3 integration); accepted but not processed yet
-    @Size(max = 255)
-    private String profileImageKey;
+    // S3 pending keys — supplied after client has uploaded to the presigned PUT URL.
+    // Ownership is validated and keys are promoted to final paths in ProfileService.
+    @Size(max = 500)
+    private String avatarKey;
 
-    @Size(max = 255)
-    private String coverImageKey;
+    @Size(max = 500)
+    private String coverKey;
 
+    // thumbnailKey: stored directly (S3 promotion deferred to Prompt 5)
     @Size(max = 255)
     private String thumbnailKey;
 
-    // External OAuth avatar URLs (e.g. Google profile photo)
+    // External OAuth avatar URLs (e.g. Google profile photo). Mutually exclusive with avatarKey/thumbnailKey.
     @Size(max = 500)
     private String profileImageUrl;
 

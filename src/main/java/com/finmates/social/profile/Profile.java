@@ -34,19 +34,25 @@ public class Profile {
     @Column(name = "name_display_preference", length = 20, nullable = false)
     private NameDisplayPreference nameDisplayPreference = NameDisplayPreference.DISPLAY_NAME;
 
-    @Column(name = "profile_image_key", length = 255)
-    private String profileImageKey;
+    /** S3 object key for the user's avatar. Mutually exclusive with profileImageUrl (DB constraint). */
+    @Column(name = "avatar_key", length = 500)
+    private String avatarKey;
 
-    @Column(name = "cover_image_key", length = 255)
-    private String coverImageKey;
+    /** S3 object key for the user's cover image. */
+    @Column(name = "cover_key", length = 500)
+    private String coverKey;
 
+    /** S3 object key for a thumbnail. Mutually exclusive with thumbnailUrl (DB constraint). */
     @Column(name = "thumbnail_key", length = 255)
     private String thumbnailKey;
 
     // V9 additions
+
+    /** External (OAuth provider) avatar URL — set when user has a Google/social avatar. */
     @Column(name = "profile_image_url", length = 500)
     private String profileImageUrl;
 
+    /** External (OAuth provider) thumbnail URL. Mutually exclusive with thumbnailKey. */
     @Column(name = "thumbnail_url", length = 500)
     private String thumbnailUrl;
 

@@ -8,6 +8,13 @@ import com.finmates.social.profile.ProfileVisibility;
 
 import java.time.OffsetDateTime;
 
+/**
+ * Full profile response — returned only to the profile owner via GET /api/profiles/me.
+ *
+ * <p>Raw S3 keys (avatarKey, coverKey, thumbnailKey) are never exposed. The URL fields
+ * contain presigned GET URLs (1h TTL) generated fresh per request, or external OAuth URLs
+ * where the user has a Google/social avatar.
+ */
 public record ProfileResponse(
         Long userId,
         String bio,
@@ -15,10 +22,11 @@ public record ProfileResponse(
         String firstName,
         String lastName,
         NameDisplayPreference nameDisplayPreference,
-        String profileImageKey,
-        String coverImageKey,
-        String thumbnailKey,
-        String profileImageUrl,
+        /** Presigned S3 URL (from avatarKey) or external OAuth avatar URL. Null if neither is set. */
+        String avatarUrl,
+        /** Presigned S3 URL for cover image. Null if not set. */
+        String coverUrl,
+        /** Presigned S3 URL (from thumbnailKey) or external OAuth thumbnail URL. Null if neither is set. */
         String thumbnailUrl,
         String location,
         String website,

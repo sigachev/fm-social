@@ -9,13 +9,18 @@ import com.finmates.social.edit.PostEditRepository;
 import com.finmates.social.post.dto.PostCreateRequest;
 import com.finmates.social.post.dto.PostResponse;
 import com.finmates.social.post.dto.PostUpdateRequest;
+import com.finmates.social.upload.S3Service;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Slf4j
 @Service
@@ -24,23 +29,71 @@ public class PostService {
 
     private final PostRepository postRepository;
     private final PostEditRepository postEditRepository;
+    private final S3Service s3Service;
 
     @Value("${finmates.edit-window-minutes}")
     private int editWindowMinutes;
 
-    public PostService(PostRepository postRepository, PostEditRepository postEditRepository) {
+    public PostService(PostRepository postRepository,
+                       PostEditRepository postEditRepository,
+                       S3Service s3Service) {
         this.postRepository = postRepository;
         this.postEditRepository = postEditRepository;
+        this.s3Service = s3Service;
     }
 
     @Transactional
     public PostResponse createPost(Long authorId, PostCreateRequest req) {
+        List<String> pendingKeys = req.getMediaKeys() != null ? req.getMediaKeys() : List.of();
+
+        // Step 1 & 2: Validate ownership and existence before touching the DB
+        for (String key : pendingKeys) {
+            s3Service.validateOwnership(authorId, key, "posts");
+            if (!s3Service.objectExists(key)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Media not yet uploaded to S3: " + key);
+            }
+        }
+
+        // Step 3: Save post first — we need the postId for the final S3 key path
         Post post = new Post();
         post.setAuthorId(authorId);
         post.setContent(req.getContent());
-        post.setMediaKeys(req.getMediaKeys() != null ? req.getMediaKeys() : new java.util.ArrayList<>());
+        post.setMediaKeys(new ArrayList<>());
         post.setVisibility(req.getVisibility() != null ? req.getVisibility() : PostVisibility.PUBLIC);
-        return toResponse(postRepository.save(post));
+        post = postRepository.save(post);
+
+        // Steps 4–9: Promote pending keys to final paths
+        if (!pendingKeys.isEmpty()) {
+            List<String> finalKeys = new ArrayList<>();
+            List<String> successfullyCopied = new ArrayList<>();
+
+            for (String pendingKey : pendingKeys) {
+                try {
+                    // Extract filename (uuid.ext) from pending key
+                    String filename = pendingKey.substring(pendingKey.lastIndexOf('/') + 1);
+                    String finalKey = "posts/" + post.getId() + "/" + filename;
+                    s3Service.copy(pendingKey, finalKey);
+                    finalKeys.add(finalKey);
+                    successfullyCopied.add(pendingKey);
+                } catch (Exception e) {
+                    log.error("Failed to promote S3 key {} for post {}: {}",
+                            pendingKey, post.getId(), e.getMessage());
+                    // continue — keep whatever succeeded
+                }
+            }
+
+            // Step 8: Update post with final keys (even if some failed — post is still created)
+            post.setMediaKeys(finalKeys);
+            post = postRepository.save(post);
+
+            // Step 9: Delete pending copies (best-effort — failures are WARN-and-swallow)
+            for (String pendingKey : successfullyCopied) {
+                s3Service.delete(pendingKey);
+            }
+        }
+
+        return toResponse(post);
     }
 
     public PostResponse getPost(Long id) {
@@ -104,12 +157,20 @@ public class PostService {
         }
     }
 
+    /**
+     * Maps a Post entity to a PostResponse, generating fresh presigned GET URLs for each media key.
+     * Returns empty list for mediaUrls when the post has no media.
+     */
     public PostResponse toResponse(Post post) {
+        List<String> mediaUrls = post.getMediaKeys().stream()
+                .map(s3Service::createPresignedGet)
+                .toList();
+
         return new PostResponse(
                 post.getId(),
                 post.getAuthorId(),
                 post.getContent(),
-                post.getMediaKeys(),
+                mediaUrls,
                 post.getStatus(),
                 post.getVisibility(),
                 post.getCommentCount(),

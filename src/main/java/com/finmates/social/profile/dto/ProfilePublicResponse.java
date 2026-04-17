@@ -5,19 +5,22 @@ import com.finmates.social.profile.ProfileVisibility;
 
 import java.time.OffsetDateTime;
 
+/**
+ * Visibility-filtered profile response — returned to other users and unauthenticated requests.
+ *
+ * <p>Raw S3 keys are never exposed. URL fields contain presigned GET URLs or external OAuth URLs.
+ * Null values indicate fields the viewer does not have access to (private profile, follower-only, etc.).
+ */
 public record ProfilePublicResponse(
         Long userId,
         String displayName,
-        // name fields null when showRealName=false or profile not accessible at follower level
         String firstName,
         String lastName,
-        String profileImageKey,
-        String profileImageUrl,
-        String thumbnailKey,
+        String avatarUrl,
         String thumbnailUrl,
-        String coverImageKey,
+        String coverUrl,
         String bio,
-        String location,           // null when showLocation=false
+        String location,
         String website,
         String timezone,
         String twitterHandle,
@@ -29,7 +32,6 @@ public record ProfilePublicResponse(
         String whatsappHandle,
         ProfileVisibility profileVisibility,
         PortfolioVisibility portfolioVisibility,
-        // visibility flags — consumers use these to know what data to request from other services
         boolean showPnl,
         boolean showPositions,
         boolean showTradingActivity,

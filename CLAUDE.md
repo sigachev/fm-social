@@ -274,6 +274,7 @@ Asset symbols are always stored **uppercase**: `BTC`, `ETH`, `SOL`. Normalize on
 - **Pipeline:** `Jenkinsfile` → `./mvnw clean package -DskipTests` → Docker → Nexus → `kubectl apply -f k8s/ -n dev`
 - **K8s manifests:** `k8s/deployment.yaml`, `k8s/service.yaml`, `k8s/ingress.yaml` (created 2026-04-16)
 - **Redis password:** `application-k8s.yml` has `REPLACE_AT_BUILD` placeholder — must be replaced with the value from K8s Secret `redis-auth` before first deploy
+- **Port mapping:** container runs on **8080** (not 80 — port 80 requires root in the JVM container). `SERVER_PORT=8080` env var set in deployment.yaml. Service routes port 80 → targetPort 8080. Ingress routes to Service port 80 unchanged.
 
 ### K8s Resource Names (asymmetric by design)
 

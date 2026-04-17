@@ -18,11 +18,13 @@ spec:
           image: 10.0.0.70:8090/fm-social:latest
           imagePullPolicy: Always
           ports:
-            - containerPort: 80
+            - containerPort: 8080
               protocol: TCP
           env:
             - name: SPRING_PROFILES_ACTIVE
               value: k8s
+            - name: SERVER_PORT
+              value: "8080"
             - name: INTERNAL_SHARED_SECRET
               valueFrom:
                 secretKeyRef:

@@ -30,7 +30,7 @@ previously scattered across `finmates-main` (PortfolioNote, profile fields, Foll
 | Migrations | Flyway (enabled, clean-slate — never manual DDL) |
 | Cache | Spring Cache + Caffeine (in-memory), Redis (distributed feed/rate-limit) |
 | Auth | Spring Security OAuth2 Resource Server, Keycloak JWT (JWKS) |
-| Media | AWS SDK v2 S3 (keys stored, not URLs) |
+| Media | AWS SDK v2 S3 (keys stored, not URLs) — **Prompt 4** |
 | Docs | springdoc-openapi-starter-webmvc-ui 2.6.0 |
 | Lombok | `@Slf4j` OK everywhere; `@Getter @Setter` on JPA entities — NEVER `@Data` |
 
@@ -79,7 +79,7 @@ OpenAPI JSON: `http://localhost:8091/v3/api-docs`
 - Migrations run automatically on startup
 - `baseline-on-migrate: false` — `social` DB must be empty on first run
 
-### Table Overview (as of V8)
+### Table Overview (as of V9)
 
 | Table | Migration | Purpose |
 |-------|-----------|---------|
@@ -93,14 +93,97 @@ OpenAPI JSON: `http://localhost:8091/v3/api-docs`
 | `content_reports` | V7 | User-submitted content reports |
 | `post_edits` | V8 | Post edit history (previous content) |
 | `comment_edits` | V8 | Comment edit history (previous content) |
+| `profiles` (extended) | V9 | Added privacy columns, OAuth avatar keys, name display preference |
+
+## Implemented REST Endpoints (Prompt 3 — 2026-04-16)
+
+22 endpoints across 6 controllers. All require a valid Keycloak JWT with the `user_id` custom claim
+(added by `finmates-main` on `/auth/me`). See **JWT user_id Claim** section below.
+
+### PostController — `/api/posts`
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/posts` | Create post |
+| GET | `/api/posts/{id}` | Get post by ID |
+| PATCH | `/api/posts/{id}` | Update post (5-min edit window) |
+| DELETE | `/api/posts/{id}` | Soft-delete post |
+| GET | `/api/posts/user/{userId}` | Get posts by user (paginated) |
+
+### CommentController — `/api/comments`
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/comments` | Create comment on POST/PORTFOLIO/ASSET |
+| GET | `/api/comments/post/{postId}` | List comments on a post |
+| GET | `/api/comments/portfolio/{userId}` | List comments on a portfolio |
+| GET | `/api/comments/asset/{symbol}` | List comments on an asset |
+| PATCH | `/api/comments/{id}` | Update comment (5-min edit window) |
+| DELETE | `/api/comments/{id}` | Soft-delete comment |
+
+### ReactionController — `/api/reactions`
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/reactions` | Toggle reaction (insert if absent, delete if present) |
+| GET | `/api/reactions/post/{postId}` | Reaction aggregate for a post |
+| GET | `/api/reactions/comment/{commentId}` | Reaction aggregate for a comment |
+
+### ProfileController — `/api/profiles`
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/profiles/me` | Get my profile |
+| PUT | `/api/profiles/me` | Update my profile |
+| GET | `/api/profiles/{userId}` | Get profile by user ID |
+| GET | `/api/profiles/{username}/public` | **HTTP 501** — username→userId resolution deferred to Prompt 5 |
+
+### FollowController — `/api/follows`
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/follows/{userId}` | Follow user |
+| DELETE | `/api/follows/{userId}` | Unfollow user |
+| GET | `/api/follows/me/following` | My following list |
+| GET | `/api/follows/me/followers` | My follower list |
+| GET | `/api/follows/me/relationship/{userId}` | My relationship to another user |
+| GET | `/api/follows/{userId}/following` | Another user's following list |
+| GET | `/api/follows/{userId}/followers` | Another user's follower list |
+
+### BlockController — `/api/blocks`
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/blocks/{userId}` | Block user (also removes mutual follows) |
+| DELETE | `/api/blocks/{userId}` | Unblock user |
+| GET | `/api/blocks` | My block list |
+
+## JWT `user_id` Claim Dependency
+
+**All write endpoints and most read endpoints require a `user_id` claim in the JWT.**
+
+`AuthenticatedUser.currentUserId()` reads `jwtToken.getClaim("user_id")` (a `Long`). This claim is
+**not** present in standard Keycloak-issued tokens — it is added by `finmates-main` when a user
+calls `GET /auth/me` (the find-or-create endpoint).
+
+**Smoke test result (2026-04-16):** All auth-required endpoints return `HTTP 403` with
+`"JWT missing user_id claim"` when tested with a raw Keycloak JWT (without the `user_id` claim).
+This is expected behavior.
+
+**Resolution (Prompt 5):** Add a Keycloak token mapper (or implement user ID resolution from the
+JWT `sub` claim via a call to `finmates-main /api/internal/users/by-keycloak-id/{sub}`).
+
+## Deferred Features (future prompts)
+
+| Feature | Prompt | Status |
+|---------|--------|--------|
+| S3 media upload/download | Prompt 4 | Not started |
+| Feed fan-out (Redis sorted sets) | Prompt 5 | Not started |
+| Username→userId cross-service resolution (`/api/profiles/{username}/public`) | Prompt 5 | Stub returns 501 |
+| Moderation endpoints (admin) | Prompt 6 | Entities/migrations exist, no controllers |
+| Frontend wiring | Prompt 7 | Not started |
 
 ## Service Dependencies
 
 ### Upstream (calls these services)
 | Service | URL (dev) | URL (prod) | Purpose |
 |---------|-----------|------------|---------|
-| finmates-main | `http://localhost:8081` | `http://finmates-main.dev.svc.cluster.local:8081` | User identity lookups (username, email) |
-| finmates-crypto | `http://localhost:8087` | `http://finmates-crypto.dev.svc.cluster.local:8087` | Asset/portfolio data for comment context |
+| finmates-main | `http://localhost:8081` | `http://main` | User identity lookups (username, email) |
+| finmates-crypto | `http://localhost:8087` | `http://crypto` | Asset/portfolio data for comment context |
 | Keycloak | `https://auth.finmates.com` | same | JWT JWKS validation |
 | Redis | `localhost:6379` (dev) | `redis.dev.svc.cluster.local:6379` | Feed sorted sets, rate limiting |
 
@@ -124,7 +207,7 @@ Internal endpoints that fm-social will expose for finmates-main and finmates-cry
 
 | Class | Package | Purpose |
 |-------|---------|---------|
-| `SecurityConfig` | `config` | Filter chain — stateless JWT, public paths |
+| `SecurityConfig` | `config` | Filter chain — stateless JWT, public paths; trust-all JwtDecoder for self-signed cert |
 | `JwtAuthConverter` | `config.security` | Keycloak role extraction (realm_access + resource_access) |
 | `JwtAuthConverterProperties` | `config.security` | `finmates.jwt.principal-attribute` + `resource-id` |
 | `RedisConfig` | `config` | `RedisTemplate<String,String>` and `<String,Long>` beans |
@@ -175,14 +258,22 @@ Asset symbols are always stored **uppercase**: `BTC`, `ETH`, `SOL`. Normalize on
 | WebClient timeout | 3-second timeout on all outbound calls — catch `TimeoutException` in service layer |
 | `comments_target_exclusive` CHECK | Enforced at DB level — POST/PORTFOLIO use `target_id`, ASSET uses `target_symbol` |
 | `reactions_unique` constraint | Toggle behavior: delete the row to "un-react"; re-insert to react again |
+| Self-signed cert on `auth.finmates.com` | `SecurityConfig` defines a custom `@Bean JwtDecoder` with trust-all SSL, same pattern as `fm-admin`. Do NOT remove this override — Spring Boot's auto-configured decoder fails PKIX validation against the self-signed Keycloak cert. |
+| `FmSocialApplicationTests.contextLoads` fails in CI | Context-loads test can't connect to DB. Needs test profile with Testcontainers or `@MockBean` JPA. Jenkinsfile uses `-DskipTests` to bypass for now. |
+| `user_id` JWT claim required by all write endpoints | Standard Keycloak tokens lack `user_id`. All authenticated endpoints throw 403 until `finmates-main` adds the claim via a Keycloak token mapper (Prompt 5). |
+| `@CacheEvict` in `ProfileService.updateProfile` | Calls `profileRepository.findById()` directly (not the cached `getProfile()`) to avoid Spring AOP self-invocation. `@CacheEvict` is intercepted by Spring proxy only when called from outside the bean (e.g., from controller). |
+| `NameDisplayPreference` uses custom converter | DB stores lowercase `full_name`/`display_name`; enum is `FULL_NAME`/`DISPLAY_NAME`. Uses `NameDisplayPreferenceConverter` (manual `@Convert` on the field, NOT `autoApply = true`). |
+| `Profile.userId` has no `@GeneratedValue` | Profile PK = user's ID from finmates-main. Do not add `@GeneratedValue` — the profile row is created with the user's ID, not auto-incremented. |
+| `Comment.parentId` is a plain `Long`, not `@ManyToOne` | Avoids N+1 and lazy-load issues for threaded comments. |
 
 ## Deployment
 
-- **Image:** built from multi-stage `Dockerfile` (eclipse-temurin:21-jdk-alpine → 21-jre-alpine)
-- **Registry:** `10.0.0.70:8090/k8s-social`
+- **Image:** `10.0.0.70:8090/fm-social:latest` (built from multi-stage `Dockerfile`)
+- **Registry:** Nexus at `10.0.0.70:8090`
 - **Namespace:** `dev`
-- **Pipeline:** `Jenkinsfile` → Build → Docker → Nexus → `kubectl apply -f deployment.yaml -n dev`
-- **deployment.yaml:** to be created in a K8s prompt (not yet written)
+- **Pipeline:** `Jenkinsfile` → `./mvnw clean package -DskipTests` → Docker → Nexus → `kubectl apply -f k8s/ -n dev`
+- **K8s manifests:** `k8s/deployment.yaml`, `k8s/service.yaml`, `k8s/ingress.yaml` (created 2026-04-16)
+- **Redis password:** `application-k8s.yml` has `REPLACE_AT_BUILD` placeholder — must be replaced with the value from K8s Secret `redis-auth` before first deploy
 
 ## Persistent Context (claude-mem)
 

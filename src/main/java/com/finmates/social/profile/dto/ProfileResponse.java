@@ -1,0 +1,50 @@
+package com.finmates.social.profile.dto;
+
+import com.finmates.social.profile.AllowMessages;
+import com.finmates.social.profile.NameDisplayPreference;
+import com.finmates.social.profile.PermissionLevel;
+import com.finmates.social.profile.PortfolioVisibility;
+import com.finmates.social.profile.ProfileVisibility;
+
+import java.time.OffsetDateTime;
+
+public record ProfileResponse(
+        Long userId,
+        String bio,
+        String displayName,
+        String firstName,
+        String lastName,
+        NameDisplayPreference nameDisplayPreference,
+        String profileImageKey,
+        String coverImageKey,
+        String thumbnailKey,
+        String profileImageUrl,
+        String thumbnailUrl,
+        String location,
+        String website,
+        String timezone,
+        String twitterHandle,
+        String discordHandle,
+        String telegramHandle,
+        String instagramHandle,
+        String facebookHandle,
+        String linkedinHandle,
+        String whatsappHandle,
+        ProfileVisibility profileVisibility,
+        PortfolioVisibility portfolioVisibility,
+        boolean showPnl,
+        boolean showPositions,
+        boolean showLocation,
+        boolean showRealName,
+        boolean showTradingActivity,
+        boolean showTradeHistory,
+        boolean showOnlineStatus,
+        boolean showInLeaderboard,
+        boolean allowFollowers,
+        boolean allowCopyTrading,
+        PermissionLevel notesPermission,
+        PermissionLevel signalCommentsPermission,
+        AllowMessages allowMessages,
+        OffsetDateTime createdAt,
+        OffsetDateTime updatedAt
+) {}

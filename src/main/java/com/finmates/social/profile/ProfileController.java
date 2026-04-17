@@ -16,7 +16,6 @@ import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api/profiles")
-@PreAuthorize("isAuthenticated()")
 @Tag(name = "Profiles", description = "User profiles — own profile management and public profile viewing")
 public class ProfileController {
 
@@ -33,6 +32,7 @@ public class ProfileController {
     }
 
     @GetMapping("/me")
+    @PreAuthorize("isAuthenticated()")
     @Operation(summary = "Get own profile (all fields)")
     @ApiResponse(responseCode = "200", description = "Own profile with all settings visible")
     @ApiResponse(responseCode = "404", description = "Profile not yet created")
@@ -42,6 +42,7 @@ public class ProfileController {
     }
 
     @PutMapping("/me")
+    @PreAuthorize("isAuthenticated()")
     @Operation(summary = "Update own profile (null fields are ignored)")
     @ApiResponse(responseCode = "200", description = "Profile updated")
     public ProfileResponse updateOwnProfile(@Valid @RequestBody ProfileUpdateRequest req) {
@@ -50,6 +51,7 @@ public class ProfileController {
     }
 
     @GetMapping("/{userId}")
+    @PreAuthorize("isAuthenticated()")
     @Operation(summary = "Get another user's profile (filtered by their visibility settings)")
     @ApiResponse(responseCode = "200", description = "Profile — fields filtered by visibility")
     @ApiResponse(responseCode = "403", description = "Profile is private")
@@ -94,6 +96,10 @@ public class ProfileController {
         }
 
         Long targetUserId = userSummary.userId();
+        if (targetUserId == null) {
+            // main returned a summary without a userId — user exists in Keycloak but not yet in main DB
+            return ResponseEntity.notFound().build();
+        }
 
         return profileService.buildPublicProfileResponse(viewerId, targetUserId, userSummary)
                 .map(ResponseEntity::ok)

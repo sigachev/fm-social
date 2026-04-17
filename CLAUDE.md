@@ -133,7 +133,7 @@ OpenAPI JSON: `http://localhost:8091/v3/api-docs`
 | GET | `/api/profiles/me` | Get my profile |
 | PUT | `/api/profiles/me` | Update my profile |
 | GET | `/api/profiles/{userId}` | Get profile by user ID |
-| GET | `/api/profiles/{username}/public` | **HTTP 501** — username→userId resolution deferred to Prompt 5 |
+| GET | `/api/profiles/{username}/public` | Public profile by username — no auth required; resolves via `UserLookupCache` (5-min TTL) |
 
 ### FollowController — `/api/follows`
 | Method | Path | Description |
@@ -265,8 +265,9 @@ The secret is shared across services — fm-messaging and fm-notifications will 
 
 | Feature | Prompt | Status |
 |---------|--------|--------|
-| Feed fan-out (Redis sorted sets) | Prompt 5 | Not started |
-| Username→userId cross-service resolution (`/api/profiles/{username}/public`) | Prompt 5 | Stub returns 501 |
+| Feed fan-out (Redis sorted sets) | Prompt 5 | **DONE** — `FeedService` + `FeedController` (`GET /api/feed`) |
+| Username→userId cross-service resolution (`/api/profiles/{username}/public`) | Prompt 5 | **DONE** — `UserLookupCache` + `buildPublicProfileResponse()` |
+| Profile auto-creation on first authenticated request | Prompt 5 | **DONE** — `ProfileEnsureFilter` + `ProfileInitializationService` |
 | thumbnailKey S3 promotion (upload endpoint + copy-on-update) | Prompt 5 | TODO |
 | Moderation endpoints (admin) | Prompt 6 | Entities/migrations exist, no controllers |
 | Frontend wiring | Prompt 7 | Not started |
@@ -301,7 +302,9 @@ Internal endpoints that fm-social will expose for finmates-main and finmates-cry
 
 | Class | Package | Purpose |
 |-------|---------|---------|
-| `SecurityConfig` | `config` | Filter chain — stateless JWT, public paths; trust-all JwtDecoder for self-signed cert |
+| `SecurityConfig` | `config` | Filter chain — stateless JWT, public paths; trust-all JwtDecoder for self-signed cert; registers `ProfileEnsureFilter` after `BearerTokenAuthenticationFilter` |
+| `ProfileEnsureFilter` | `config` | Thin `OncePerRequestFilter` — fires after JWT validation; extracts `user_id` + display name from JWT, delegates to `ProfileInitializationService`; swallows all exceptions (never breaks a request) |
+| `ProfileInitializationService` | `profile` | Service — auto-creates `social.profiles` row for authenticated users on first request; 60s Caffeine cache (50k max) to avoid per-request DB hits; race-safe via `DataIntegrityViolationException` swallow |
 | `JwtAuthConverter` | `config.security` | Keycloak role extraction (realm_access + resource_access) |
 | `JwtAuthConverterProperties` | `config.security` | `finmates.jwt.principal-attribute` + `resource-id` |
 | `RedisConfig` | `config` | `RedisTemplate<String,String>` and `<String,Long>` beans |

@@ -19,6 +19,7 @@ import org.springframework.web.client.RestTemplate;
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
+import com.finmates.social.config.ProfileEnsureFilter;
 import javax.net.ssl.X509TrustManager;
 import java.io.IOException;
 import java.net.HttpURLConnection;
@@ -43,9 +44,12 @@ public class SecurityConfig {
     private String issuerUri;
 
     private final JwtAuthConverter jwtAuthConverter;
+    private final ProfileEnsureFilter profileEnsureFilter;
 
-    public SecurityConfig(JwtAuthConverter jwtAuthConverter) {
+    public SecurityConfig(JwtAuthConverter jwtAuthConverter,
+                          ProfileEnsureFilter profileEnsureFilter) {
         this.jwtAuthConverter = jwtAuthConverter;
+        this.profileEnsureFilter = profileEnsureFilter;
     }
 
     /**
@@ -97,7 +101,9 @@ public class SecurityConfig {
             )
             .oauth2ResourceServer(oauth2 -> oauth2
                 .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthConverter))
-            );
+            )
+            .addFilterAfter(profileEnsureFilter,
+                    org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter.class);
 
         return http.build();
     }

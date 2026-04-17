@@ -7,6 +7,7 @@ import com.finmates.social.client.PortfolioSummaryResponse;
  * No S3 keys exposed — avatarUrl and coverUrl are presigned GET URLs.
  */
 public record PublicProfileResponse(
+        Long userId,
         String username,
         String displayName,
         String bio,

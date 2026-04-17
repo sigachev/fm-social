@@ -13,6 +13,7 @@ import java.util.List;
 public record PostResponse(
         Long id,
         Long authorId,
+        String authorUsername,
         String content,
         List<String> mediaUrls,
         PostStatus status,

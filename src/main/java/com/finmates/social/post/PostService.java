@@ -47,7 +47,7 @@ public class PostService {
     }
 
     @Transactional
-    public PostResponse createPost(Long authorId, PostCreateRequest req) {
+    public PostResponse createPost(Long authorId, String authorUsername, PostCreateRequest req) {
         List<String> pendingKeys = req.getMediaKeys() != null ? req.getMediaKeys() : List.of();
 
         // Step 1 & 2: Validate ownership and existence before touching the DB
@@ -62,6 +62,7 @@ public class PostService {
         // Step 3: Save post first — we need the postId for the final S3 key path
         Post post = new Post();
         post.setAuthorId(authorId);
+        post.setAuthorUsername(authorUsername);
         post.setContent(req.getContent());
         post.setMediaKeys(new ArrayList<>());
         post.setVisibility(req.getVisibility() != null ? req.getVisibility() : PostVisibility.PUBLIC);
@@ -187,6 +188,7 @@ public class PostService {
         return new PostResponse(
                 post.getId(),
                 post.getAuthorId(),
+                post.getAuthorUsername(),
                 post.getContent(),
                 mediaUrls,
                 post.getStatus(),

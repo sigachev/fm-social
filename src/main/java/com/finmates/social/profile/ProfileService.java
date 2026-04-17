@@ -303,6 +303,7 @@ public class ProfileService {
         }
 
         return Optional.of(new PublicProfileResponse(
+                targetUserId,
                 userSummary.username(),
                 displayName,
                 profile.getBio(),

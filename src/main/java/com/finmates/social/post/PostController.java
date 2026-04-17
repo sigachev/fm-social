@@ -38,7 +38,8 @@ public class PostController {
     @ApiResponse(responseCode = "400", description = "Validation error")
     public PostResponse createPost(@Valid @RequestBody PostCreateRequest req) {
         Long userId = authenticatedUser.currentUserId();
-        return postService.createPost(userId, req);
+        String username = authenticatedUser.currentUsername();
+        return postService.createPost(userId, username, req);
     }
 
     @GetMapping("/{id}")

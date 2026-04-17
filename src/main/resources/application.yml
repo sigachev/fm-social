@@ -55,6 +55,8 @@ logging:
     org.hibernate.SQL: INFO
 
 fm-social:
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173,https://finmates.com,https://www.finmates.com}
   s3:
     bucket: ${S3_BUCKET:finmates-media}
     region: ${AWS_REGION:us-east-1}

@@ -161,12 +161,8 @@ OpenAPI JSON: `http://localhost:8091/v3/api-docs`
 **not** present in standard Keycloak-issued tokens — it is added by `finmates-main` when a user
 calls `GET /auth/me` (the find-or-create endpoint).
 
-**Smoke test result (2026-04-16):** All auth-required endpoints return `HTTP 403` with
-`"JWT missing user_id claim"` when tested with a raw Keycloak JWT (without the `user_id` claim).
-This is expected behavior.
-
-**Resolution (Prompt 5):** Add a Keycloak token mapper (or implement user ID resolution from the
-JWT `sub` claim via a call to `finmates-main /api/internal/users/by-keycloak-id/{sub}`).
+The `user_id` claim is set directly on the Keycloak JWT via a protocol mapper — no call to
+`finmates-main /auth/me` is required. Standard login tokens include the claim.
 
 ## S3 Media Integration (Prompt 4 — 2026-04-17)
 

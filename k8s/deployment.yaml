@@ -47,6 +47,8 @@ spec:
                   key: AWS_REGION
             - name: S3_BUCKET
               value: "finmates-media"
+            - name: CORS_ALLOWED_ORIGINS
+              value: "https://finmates.com,https://www.finmates.com"
           resources:
             limits:
               cpu: '1'

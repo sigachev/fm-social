@@ -1,7 +1,7 @@
 package com.finmates.social.post;
 
-import com.finmates.social.common.PageResponse;
 import com.finmates.social.common.security.AuthenticatedUser;
+import com.finmates.social.feed.FeedResponse;
 import com.finmates.social.post.dto.PostCreateRequest;
 import com.finmates.social.post.dto.PostResponse;
 import com.finmates.social.post.dto.PostUpdateRequest;
@@ -9,11 +9,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
@@ -72,14 +68,13 @@ public class PostController {
     }
 
     @GetMapping("/user/{userId}")
-    @Operation(summary = "List active posts by a user (paginated)")
-    @ApiResponse(responseCode = "200", description = "Page of posts")
-    public PageResponse<PostResponse> getPostsByUser(
+    @Operation(summary = "List active posts by a user (cursor-based, same shape as /api/feed)")
+    @ApiResponse(responseCode = "200", description = "Feed-shaped response: { posts, nextCursor, hasMore }")
+    public FeedResponse getPostsByUser(
             @PathVariable Long userId,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
-        size = Math.min(size, 100);
-        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
-        return postService.getPostsByUser(userId, pageable);
+            @RequestParam(required = false) Long cursor,
+            @RequestParam(defaultValue = "20") int limit) {
+        limit = Math.min(limit, 50);
+        return postService.getUserPostsFeed(userId, cursor, limit);
     }
 }

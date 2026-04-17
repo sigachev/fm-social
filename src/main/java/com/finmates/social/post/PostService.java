@@ -6,13 +6,18 @@ import com.finmates.social.common.exception.ForbiddenActionException;
 import com.finmates.social.common.exception.ResourceNotFoundException;
 import com.finmates.social.edit.PostEdit;
 import com.finmates.social.edit.PostEditRepository;
+import com.finmates.social.feed.FeedResponse;
 import com.finmates.social.feed.FeedService;
 import com.finmates.social.post.dto.PostCreateRequest;
 import com.finmates.social.post.dto.PostResponse;
 import com.finmates.social.post.dto.PostUpdateRequest;
+import com.finmates.social.profile.ProfileRepository;
 import com.finmates.social.upload.S3Service;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -22,6 +27,7 @@ import org.springframework.web.server.ResponseStatusException;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Service
@@ -32,6 +38,15 @@ public class PostService {
     private final PostEditRepository postEditRepository;
     private final S3Service s3Service;
     private final FeedService feedService;
+    private final ProfileRepository profileRepository;
+
+    /** Short-lived cache: avoids a profile DB hit per post during feed / profile renders. */
+    private final Cache<Long, AuthorInfo> authorCache = Caffeine.newBuilder()
+            .expireAfterWrite(30, TimeUnit.SECONDS)
+            .maximumSize(1_000)
+            .build();
+
+    private record AuthorInfo(String displayName, String avatarUrl) {}
 
     @Value("${finmates.edit-window-minutes}")
     private int editWindowMinutes;
@@ -39,11 +54,13 @@ public class PostService {
     public PostService(PostRepository postRepository,
                        PostEditRepository postEditRepository,
                        S3Service s3Service,
-                       FeedService feedService) {
+                       FeedService feedService,
+                       ProfileRepository profileRepository) {
         this.postRepository = postRepository;
         this.postEditRepository = postEditRepository;
         this.s3Service = s3Service;
         this.feedService = feedService;
+        this.profileRepository = profileRepository;
     }
 
     @Transactional
@@ -75,7 +92,6 @@ public class PostService {
 
             for (String pendingKey : pendingKeys) {
                 try {
-                    // Extract filename (uuid.ext) from pending key
                     String filename = pendingKey.substring(pendingKey.lastIndexOf('/') + 1);
                     String finalKey = "posts/" + post.getId() + "/" + filename;
                     s3Service.copy(pendingKey, finalKey);
@@ -84,15 +100,12 @@ public class PostService {
                 } catch (Exception e) {
                     log.error("Failed to promote S3 key {} for post {}: {}",
                             pendingKey, post.getId(), e.getMessage());
-                    // continue — keep whatever succeeded
                 }
             }
 
-            // Step 8: Update post with final keys (even if some failed — post is still created)
             post.setMediaKeys(finalKeys);
             post = postRepository.save(post);
 
-            // Step 9: Delete pending copies (best-effort — failures are WARN-and-swallow)
             for (String pendingKey : successfullyCopied) {
                 s3Service.delete(pendingKey);
             }
@@ -137,8 +150,27 @@ public class PostService {
         postRepository.save(post);
     }
 
+    /** Legacy page-based query — kept for internal use; prefer getUserPostsFeed for API responses. */
     public PageResponse<PostResponse> getPostsByUser(Long authorId, Pageable pageable) {
         return PageResponse.from(postRepository.findActiveByAuthorId(authorId, pageable).map(this::toResponse));
+    }
+
+    /** Returns user posts in FeedResponse shape (cursor-based) — used by the public endpoint. */
+    public FeedResponse getUserPostsFeed(Long userId, Long cursor, int limit) {
+        int fetchSize = limit + 1;
+        Pageable pageable = PageRequest.of(0, fetchSize);
+
+        List<Post> posts = cursor == null
+                ? postRepository.findActiveByAuthorIdDesc(userId, pageable)
+                : postRepository.findActiveByAuthorIdBeforeCursor(userId, cursor, pageable);
+
+        boolean hasMore = posts.size() > limit;
+        if (hasMore) posts = new ArrayList<>(posts.subList(0, limit));
+
+        Long nextCursor = (hasMore && !posts.isEmpty()) ? posts.get(posts.size() - 1).getId() : null;
+        List<PostResponse> responses = posts.stream().map(this::toResponse).toList();
+
+        return new FeedResponse(responses, nextCursor, hasMore);
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────────
@@ -170,6 +202,23 @@ public class PostService {
     }
 
     /**
+     * Resolves author display info (displayName + avatarUrl) via a short-lived Caffeine cache.
+     * Falls back to (null, null) if no profile row exists yet.
+     */
+    private AuthorInfo resolveAuthor(Long authorId) {
+        return authorCache.get(authorId, id ->
+                profileRepository.findById(id)
+                        .map(p -> {
+                            String avatarUrl = p.getAvatarKey() != null
+                                    ? s3Service.createPresignedGet(p.getAvatarKey())
+                                    : p.getProfileImageUrl();   // OAuth avatar URL or null
+                            return new AuthorInfo(p.getDisplayName(), avatarUrl);
+                        })
+                        .orElse(new AuthorInfo(null, null))
+        );
+    }
+
+    /**
      * Public alias used by FeedController to convert a Post fetched outside this service.
      */
     public PostResponse toPublicResponse(Post post) {
@@ -177,18 +226,22 @@ public class PostService {
     }
 
     /**
-     * Maps a Post entity to a PostResponse, generating fresh presigned GET URLs for each media key.
-     * Returns empty list for mediaUrls when the post has no media.
+     * Maps a Post entity to a PostResponse, generating fresh presigned GET URLs for media keys
+     * and resolving author display info from the profile cache.
      */
     public PostResponse toResponse(Post post) {
         List<String> mediaUrls = post.getMediaKeys().stream()
                 .map(s3Service::createPresignedGet)
                 .toList();
 
+        AuthorInfo author = resolveAuthor(post.getAuthorId());
+
         return new PostResponse(
                 post.getId(),
                 post.getAuthorId(),
                 post.getAuthorUsername(),
+                author.displayName(),
+                author.avatarUrl(),
                 post.getContent(),
                 mediaUrls,
                 post.getStatus(),

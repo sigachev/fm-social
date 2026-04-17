@@ -14,13 +14,17 @@ import com.finmates.social.profile.dto.ProfileUpdateRequest;
 import com.finmates.social.profile.dto.PublicProfileResponse;
 import com.finmates.social.upload.S3Service;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.server.ResponseStatusException;
+import reactor.core.publisher.Mono;
 
+import java.time.Duration;
 import java.util.Optional;
 
 @Slf4j
@@ -33,17 +37,20 @@ public class ProfileService {
     private final BlockRepository blockRepository;
     private final PostRepository postRepository;
     private final S3Service s3Service;
+    private final WebClient cryptoServiceWebClient;
 
     public ProfileService(ProfileRepository profileRepository,
                           FollowRepository followRepository,
                           BlockRepository blockRepository,
                           PostRepository postRepository,
-                          S3Service s3Service) {
+                          S3Service s3Service,
+                          @Qualifier("cryptoServiceWebClient") WebClient cryptoServiceWebClient) {
         this.profileRepository = profileRepository;
         this.followRepository = followRepository;
         this.blockRepository = blockRepository;
         this.postRepository = postRepository;
         this.s3Service = s3Service;
+        this.cryptoServiceWebClient = cryptoServiceWebClient;
     }
 
     @Cacheable(value = "profileCache", key = "#userId")
@@ -274,6 +281,27 @@ public class ProfileService {
 
         String displayName = resolveDisplayName(profile);
 
+        PortfolioSummaryResponse portfolio = null;
+        try {
+            portfolio = cryptoServiceWebClient.get()
+                    .uri("/api/internal/portfolios/user/{id}/summary", targetUserId)
+                    .retrieve()
+                    .bodyToMono(PortfolioSummaryResponse.class)
+                    .timeout(Duration.ofSeconds(3))
+                    .onErrorResume(e -> {
+                        if (e instanceof org.springframework.web.reactive.function.client.WebClientResponseException.NotFound) {
+                            log.debug("No portfolio data for userId={} (404 — no trading activity)", targetUserId);
+                        } else {
+                            log.warn("Portfolio lookup failed for userId={}: {}", targetUserId, e.getMessage());
+                        }
+                        return Mono.empty();
+                    })
+                    .blockOptional()
+                    .orElse(null);
+        } catch (Exception e) {
+            log.warn("Portfolio lookup exception for userId={}: {}", targetUserId, e.getMessage());
+        }
+
         return Optional.of(new PublicProfileResponse(
                 userSummary.username(),
                 displayName,
@@ -281,7 +309,7 @@ public class ProfileService {
                 avatarUrl,
                 coverUrl,
                 new PublicProfileResponse.Stats(postsCount, followersCount, followingCount),
-                null,  // portfolio — not fetched here; requires separate crypto service call
+                portfolio,
                 userSummary.emailVerified(),
                 isFollowing,
                 isBlocked

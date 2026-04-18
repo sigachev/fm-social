@@ -4,16 +4,22 @@ import com.finmates.social.client.UserLookupCache;
 import com.finmates.social.common.security.AuthenticatedUser;
 import com.finmates.social.profile.dto.ProfilePublicResponse;
 import com.finmates.social.profile.dto.ProfileResponse;
+import com.finmates.social.profile.dto.ProfileSummaryResponse;
 import com.finmates.social.profile.dto.ProfileUpdateRequest;
 import com.finmates.social.profile.dto.PublicProfileResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Size;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
+@Validated
 @RestController
 @RequestMapping("/api/profiles")
 @Tag(name = "Profiles", description = "User profiles — own profile management and public profile viewing")
@@ -104,5 +110,24 @@ public class ProfileController {
         return profileService.buildPublicProfileResponse(viewerId, targetUserId, userSummary)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
+    }
+
+    @GetMapping("/batch")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(
+        summary     = "Batch profile summary lookup",
+        description = "Fetch lightweight profile data (userId, displayName, avatarUrl) for up to 200 users. "
+                    + "Intended for rendering avatars and names in comment/post lists. "
+                    + "IDs with no profile are silently omitted — callers should fall back to initials. "
+                    + "Response order is NOT guaranteed to match input order; build a Map<userId, summary> for lookup."
+    )
+    @ApiResponse(responseCode = "200", description = "Summaries for found profiles (missing IDs omitted)")
+    @ApiResponse(responseCode = "400", description = "ids param missing or > 200 values")
+    @ApiResponse(responseCode = "401", description = "Not authenticated")
+    public ResponseEntity<List<ProfileSummaryResponse>> getBatchProfiles(
+            @RequestParam("ids")
+            @Size(min = 1, max = 200, message = "ids must contain 1–200 values")
+            List<Long> userIds) {
+        return ResponseEntity.ok(profileService.getBatchSummaries(userIds));
     }
 }

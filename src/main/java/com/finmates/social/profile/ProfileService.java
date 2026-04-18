@@ -25,6 +25,7 @@ import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Mono;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Optional;
 
 @Slf4j
@@ -325,6 +326,30 @@ public class ProfileService {
                     : p.getFirstName();
         }
         return null;
+    }
+
+    /**
+     * Returns lightweight profile summaries for the given user IDs.
+     *
+     * <p>IDs with no profile row are silently omitted — callers must tolerate missing entries
+     * (e.g. deleted users) and fall back to initials. Response order is NOT guaranteed to match
+     * input order; build a {@code Map<Long, ProfileSummaryResponse>} for lookup.
+     *
+     * @param userIds up to 200 user IDs (duplicates are deduplicated)
+     */
+    public List<com.finmates.social.profile.dto.ProfileSummaryResponse> getBatchSummaries(List<Long> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            return List.of();
+        }
+        List<Long> distinctIds = userIds.stream().distinct().toList();
+        List<Profile> profiles = profileRepository.findAllById(distinctIds);
+        return profiles.stream()
+                .map(p -> new com.finmates.social.profile.dto.ProfileSummaryResponse(
+                        p.getUserId(),
+                        p.getDisplayName(),
+                        resolveAvatarUrl(p)
+                ))
+                .toList();
     }
 
     /** Presigned S3 URL if avatarKey is set; external OAuth URL otherwise; null if neither. */

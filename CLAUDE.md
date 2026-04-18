@@ -138,6 +138,7 @@ OpenAPI JSON: `http://localhost:8091/v3/api-docs`
 | PUT | `/api/profiles/me` | Update my profile |
 | GET | `/api/profiles/{userId}` | Get profile by user ID |
 | GET | `/api/profiles/{username}/public` | Public profile by username — no auth required; resolves via `UserLookupCache` (5-min TTL) |
+| GET | `/api/profiles/batch?ids=1,2,3` | **Batch profile summary lookup** — lightweight `{userId, displayName, avatarUrl}` for up to 200 users; intended for rendering avatars in comment/post lists; missing IDs omitted silently |
 
 ### FollowController — `/api/follows`
 | Method | Path | Description |

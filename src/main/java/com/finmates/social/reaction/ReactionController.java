@@ -38,13 +38,15 @@ public class ReactionController {
     @Operation(summary = "Get aggregated reaction counts for a post")
     @ApiResponse(responseCode = "200", description = "Reaction counts by type")
     public ReactionAggregateResponse getPostReactions(@PathVariable Long postId) {
-        return reactionService.getAggregates(ReactionTargetType.POST, postId);
+        Long userId = authenticatedUser.currentUserId();
+        return reactionService.getAggregates(ReactionTargetType.POST, postId, userId);
     }
 
     @GetMapping("/comment/{commentId}")
     @Operation(summary = "Get aggregated reaction counts for a comment")
     @ApiResponse(responseCode = "200", description = "Reaction counts by type")
     public ReactionAggregateResponse getCommentReactions(@PathVariable Long commentId) {
-        return reactionService.getAggregates(ReactionTargetType.COMMENT, commentId);
+        Long userId = authenticatedUser.currentUserId();
+        return reactionService.getAggregates(ReactionTargetType.COMMENT, commentId, userId);
     }
 }

@@ -53,15 +53,19 @@ public class ReactionService {
     }
 
     @Transactional(readOnly = true)
-    public ReactionAggregateResponse getAggregates(ReactionTargetType targetType, Long targetId) {
+    public ReactionAggregateResponse getAggregates(ReactionTargetType targetType, Long targetId, Long viewerId) {
         List<Reaction> reactions = reactionRepository.findByTargetTypeAndTargetId(targetType, targetId);
 
         Map<ReactionType, Long> counts = new EnumMap<>(ReactionType.class);
         for (ReactionType type : ReactionType.values()) {
             counts.put(type, 0L);
         }
+        String myReactionType = null;
         for (Reaction r : reactions) {
             counts.merge(r.getReactionType(), 1L, Long::sum);
+            if (viewerId != null && viewerId.equals(r.getUserId())) {
+                myReactionType = r.getReactionType().name();
+            }
         }
 
         long total = reactions.size();
@@ -71,7 +75,8 @@ public class ReactionService {
                 counts.get(ReactionType.FIRE),
                 counts.get(ReactionType.DIAMOND_HANDS),
                 counts.get(ReactionType.REKT),
-                total
+                total,
+                myReactionType
         );
     }
 

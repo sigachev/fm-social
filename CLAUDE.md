@@ -96,6 +96,9 @@ OpenAPI JSON: `http://localhost:8091/v3/api-docs`
 | `profiles` (extended) | V9 | Added privacy columns, OAuth avatar keys, name display preference |
 | `profiles` (columns renamed) | V10 | `profile_image_key` → `avatar_key VARCHAR(500)`, `cover_image_key` → `cover_key VARCHAR(500)` |
 | `posts` (author_username) | V11 | Added `author_username VARCHAR(50)` — denormalized from JWT at post-creation time; null for pre-V11 posts |
+| posts (backfill) | V12 | Backfilled author_username for pre-V11 posts via internal lookup |
+| posts + comments (removal audit) | V13 | Added removed_at, removed_by, removal_reason for admin moderation |
+| `reports` | V14 | User-submitted reports table — canonical moderation queue (dedup, rate-limited) |
 
 ## Implemented REST Endpoints (Prompt 3 — 2026-04-16)
 

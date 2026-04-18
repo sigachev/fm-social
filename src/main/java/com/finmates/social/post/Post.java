@@ -56,6 +56,17 @@ public class Post {
     @Column(name = "last_edited_at")
     private OffsetDateTime lastEditedAt;
 
+    /** Set when status transitions to REMOVED via admin moderation action. */
+    @Column(name = "removed_at")
+    private OffsetDateTime removedAt;
+
+    /** ID of the admin user who removed this post. */
+    @Column(name = "removed_by")
+    private Long removedBy;
+
+    @Column(name = "removal_reason", length = 500)
+    private String removalReason;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 

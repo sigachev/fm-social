@@ -64,6 +64,7 @@ public class FeedController {
         for (Long postId : postIds) {
             Post post = postsById.get(postId);
             if (post == null) continue;  // deleted post, skip
+            if (post.getStatus() == com.finmates.social.post.PostStatus.REMOVED) continue;
             // Filter posts from users who blocked us or we blocked
             if (blockRepository.existsBlockInEitherDirection(userId, post.getAuthorId())) continue;
 

@@ -93,6 +93,32 @@ public class CommentService {
         }
     }
 
+    /** Admin moderation: removes a comment with audit trail. */
+    @Transactional
+    public CommentResponse adminRemoveComment(Long id, Long adminUserId, String reason) {
+        Comment comment = findComment(id);
+        comment.setStatus(CommentStatus.REMOVED);
+        comment.setRemovedAt(java.time.OffsetDateTime.now());
+        comment.setRemovedBy(adminUserId);
+        comment.setRemovalReason(reason);
+        return toResponse(commentRepository.save(comment));
+    }
+
+    /** Admin moderation: restores a removed comment and clears removal audit fields. */
+    @Transactional
+    public CommentResponse adminRestoreComment(Long id, Long adminUserId) {
+        Comment comment = findComment(id);
+        if (comment.getStatus() != CommentStatus.REMOVED) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.CONFLICT, "Comment is not removed");
+        }
+        comment.setStatus(CommentStatus.ACTIVE);
+        comment.setRemovedAt(null);
+        comment.setRemovedBy(null);
+        comment.setRemovalReason(null);
+        return toResponse(commentRepository.save(comment));
+    }
+
     public PageResponse<CommentResponse> getCommentsByPost(Long postId, Pageable pageable) {
         return PageResponse.from(commentRepository.findActiveByPostId(postId, pageable).map(this::toResponse));
     }

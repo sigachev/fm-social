@@ -2,6 +2,7 @@ package com.finmates.social.post;
 
 import com.finmates.social.common.security.AuthenticatedUser;
 import com.finmates.social.feed.FeedResponse;
+import com.finmates.social.moderation.UserBanCheckService;
 import com.finmates.social.post.dto.PostCreateRequest;
 import com.finmates.social.post.dto.PostResponse;
 import com.finmates.social.post.dto.PostUpdateRequest;
@@ -21,10 +22,14 @@ public class PostController {
 
     private final PostService postService;
     private final AuthenticatedUser authenticatedUser;
+    private final UserBanCheckService userBanCheckService;
 
-    public PostController(PostService postService, AuthenticatedUser authenticatedUser) {
+    public PostController(PostService postService,
+                          AuthenticatedUser authenticatedUser,
+                          UserBanCheckService userBanCheckService) {
         this.postService = postService;
         this.authenticatedUser = authenticatedUser;
+        this.userBanCheckService = userBanCheckService;
     }
 
     @PostMapping
@@ -32,8 +37,10 @@ public class PostController {
     @Operation(summary = "Create a new post")
     @ApiResponse(responseCode = "201", description = "Post created")
     @ApiResponse(responseCode = "400", description = "Validation error")
+    @ApiResponse(responseCode = "403", description = "Account suspended or banned")
     public PostResponse createPost(@Valid @RequestBody PostCreateRequest req) {
         Long userId = authenticatedUser.currentUserId();
+        userBanCheckService.assertNotBanned(userId);
         String username = authenticatedUser.currentUsername();
         return postService.createPost(userId, username, req);
     }

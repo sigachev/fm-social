@@ -20,7 +20,6 @@ import org.springframework.web.client.RestTemplate;
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
-import com.finmates.social.config.ProfileEnsureFilter;
 import javax.net.ssl.X509TrustManager;
 import java.io.IOException;
 import java.net.HttpURLConnection;
@@ -38,27 +37,25 @@ public class SecurityConfig {
             "/v3/api-docs/**",
             "/swagger-ui/**",
             "/swagger-ui.html",
-            "/api/profiles/*/public"    // public profile view — no auth required
+            "/api/profiles/*/public",
+            "/api/internal/**"
     };
 
     @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri}")
     private String issuerUri;
 
     private final JwtAuthConverter jwtAuthConverter;
+    private final InternalSecretFilter internalSecretFilter;
     private final ProfileEnsureFilter profileEnsureFilter;
 
     public SecurityConfig(JwtAuthConverter jwtAuthConverter,
+                          InternalSecretFilter internalSecretFilter,
                           ProfileEnsureFilter profileEnsureFilter) {
         this.jwtAuthConverter = jwtAuthConverter;
+        this.internalSecretFilter = internalSecretFilter;
         this.profileEnsureFilter = profileEnsureFilter;
     }
 
-    /**
-     * Custom JwtDecoder that trusts self-signed certs (auth.finmates.com).
-     * Spring Boot's auto-configured decoder fails PKIX validation against the
-     * self-signed Keycloak cert. This bean overrides it with a trust-all SSL
-     * context scoped only to JWK Set fetches — same pattern as fm-admin.
-     */
     @Bean
     public JwtDecoder jwtDecoder() throws Exception {
         SSLContext sslContext = SSLContext.getInstance("TLS");
@@ -103,6 +100,8 @@ public class SecurityConfig {
             .oauth2ResourceServer(oauth2 -> oauth2
                 .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthConverter))
             )
+            .addFilterBefore(internalSecretFilter,
+                    org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter.class)
             .addFilterAfter(profileEnsureFilter,
                     org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter.class);
 

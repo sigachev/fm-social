@@ -79,7 +79,7 @@ OpenAPI JSON: `http://localhost:8091/v3/api-docs`
 - Migrations run automatically on startup
 - `baseline-on-migrate: false` — `social` DB must be empty on first run
 
-### Table Overview (as of V9)
+### Table Overview (as of V14)
 
 | Table | Migration | Purpose |
 |-------|-----------|---------|
@@ -266,7 +266,7 @@ The secret is shared across services — fm-messaging and fm-notifications will 
 | Username→userId cross-service resolution (`/api/profiles/{username}/public`) | Prompt 5 | **DONE** — `UserLookupCache` + `buildPublicProfileResponse()` |
 | Profile auto-creation on first authenticated request | Prompt 5 | **DONE** — `ProfileEnsureFilter` + `ProfileInitializationService` |
 | thumbnailKey S3 promotion (upload endpoint + copy-on-update) | Prompt 5 | TODO |
-| Moderation endpoints (admin) | Prompt 6 | Entities/migrations exist, no controllers |
+| Moderation foundation (Prompt 6a) | Prompt 6 | **DONE** â€” V13 removal columns, V14 reports table, ReportController/Service, internal remove/restore endpoints, InternalSecretFilter, UserBanCheckService |
 | Frontend wiring | Prompt 7 | Not started |
 
 ## Service Dependencies
@@ -342,6 +342,60 @@ the CDN domain or bucket changes.
 Asset symbols are always stored **uppercase**: `BTC`, `ETH`, `SOL`. Normalize on input:
 `symbol.trim().toUpperCase()` before any DB write or Redis key construction.
 
+
+## Moderation Architecture (Prompt 6a â€” 2026-04-17)
+
+### Content Removal (Posts and Comments)
+
+Soft-removal is already supported via `PostStatus.REMOVED` / `CommentStatus.REMOVED`. V13 adds audit columns so admins can see who removed content and why:
+
+| Column | Type | Purpose |
+|--------|------|---------|
+| `removed_at` | TIMESTAMPTZ | When the content was removed |
+| `removed_by` | BIGINT | Admin user ID who removed it |
+| `removal_reason` | VARCHAR(500) | Free-text reason |
+
+**User self-delete** sets `status=REMOVED` only (no audit fields â€” by design; user owns the action).
+**Admin remove** calls `POST /api/internal/posts/{id}/remove` or `POST /api/internal/comments/{id}/remove`, which also sets `removed_at/by/reason`.
+
+`FeedController` explicitly skips posts with `status=REMOVED` (line-level filter added in FeedController). All existing `findActive*` repository queries already exclude `REMOVED` via the `status = 'ACTIVE'` JPQL clause.
+
+### User Reports
+
+**User endpoint:** `POST /api/reports` â€” creates a report with dedup and rate-limiting.
+**My reports:** `GET /api/reports/mine` â€” paginated list of own submissions.
+
+**Business rules:**
+- 1 report per (reporter, target_type, target_id) â€” duplicate returns HTTP 409
+- Max 10 reports per user per 24 hours â€” over-limit returns HTTP 429
+- Cannot report your own posts, comments, or yourself
+- Target must exist (post or comment validated; USER existence deferred to ban time)
+
+**Package:** `com.finmates.social.report` â€” `Report`, `ReportRepository`, `ReportService`, `ReportController`, `ReportInternalController`, and all enums.
+
+**Enums:** `ReportTargetType` (POST, COMMENT, USER), `ReportReason` (SPAM, HARASSMENT, HATE_SPEECH, MISINFORMATION, MARKET_MANIPULATION, INAPPROPRIATE_CONTENT, SCAM_OR_FRAUD, IMPERSONATION, OTHER), `ReportStatus` (PENDING, REVIEWED, DISMISSED), `ResolutionAction` (CONTENT_REMOVED, USER_WARNED, USER_SUSPENDED, USER_BANNED, NO_ACTION).
+
+### Internal Endpoints (Moderation)
+
+All `/api/internal/**` paths are `permitAll()` in SecurityConfig but gated by `InternalSecretFilter` (validates `X-Internal-Secret` header â€” timing-safe comparison against `finmates.internal.shared-secret`). No JWT required.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/internal/reports` | Admin report queue (filter by status) |
+| GET | `/api/internal/reports/{id}` | Single report |
+| PUT | `/api/internal/reports/{id}/resolve` | Resolve a report (REVIEWED / DISMISSED) |
+| PUT | `/api/internal/posts/{id}/remove` | Admin-remove a post with audit trail |
+| PUT | `/api/internal/posts/{id}/restore` | Restore a removed post |
+| PUT | `/api/internal/comments/{id}/remove` | Admin-remove a comment with audit trail |
+| PUT | `/api/internal/comments/{id}/restore` | Restore a removed comment |
+
+### Ban Check at Write Time
+
+`UserBanCheckService` (package `com.finmates.social.moderation`) is called in `PostController.createPost()` and `CommentController.createComment()` before any write. It calls `finmates-main` at `GET /api/internal/users/{userId}/ban-status` via the `mainServiceWebClient` with a 60-second Caffeine cache (5000 max entries).
+
+- PERMANENT ban or active SUSPENSION â†’ HTTP 403 "Your account has been suspended or banned"
+- Network errors â†’ fail-open (check skipped, write proceeds) to prevent ban-service outages blocking all social activity
+- Invalidate cache: `userBanCheckService.invalidate(userId)` after an unban
 ## Known Gotchas
 
 | Issue | Pattern |

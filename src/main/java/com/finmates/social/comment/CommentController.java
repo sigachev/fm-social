@@ -2,6 +2,7 @@ package com.finmates.social.comment;
 
 import com.finmates.social.common.PageResponse;
 import com.finmates.social.common.security.AuthenticatedUser;
+import com.finmates.social.moderation.UserBanCheckService;
 import com.finmates.social.comment.dto.CommentCreateRequest;
 import com.finmates.social.comment.dto.CommentResponse;
 import com.finmates.social.comment.dto.CommentUpdateRequest;
@@ -24,10 +25,14 @@ public class CommentController {
 
     private final CommentService commentService;
     private final AuthenticatedUser authenticatedUser;
+    private final UserBanCheckService userBanCheckService;
 
-    public CommentController(CommentService commentService, AuthenticatedUser authenticatedUser) {
+    public CommentController(CommentService commentService,
+                             AuthenticatedUser authenticatedUser,
+                             UserBanCheckService userBanCheckService) {
         this.commentService = commentService;
         this.authenticatedUser = authenticatedUser;
+        this.userBanCheckService = userBanCheckService;
     }
 
     @PostMapping
@@ -35,8 +40,10 @@ public class CommentController {
     @Operation(summary = "Create a comment on a post, portfolio, or asset")
     @ApiResponse(responseCode = "201", description = "Comment created")
     @ApiResponse(responseCode = "400", description = "Validation error or invalid target combination")
+    @ApiResponse(responseCode = "403", description = "Account suspended or banned")
     public CommentResponse createComment(@Valid @RequestBody CommentCreateRequest req) {
         Long userId = authenticatedUser.currentUserId();
+        userBanCheckService.assertNotBanned(userId);
         String username = authenticatedUser.currentUsername();
         return commentService.createComment(userId, username, req);
     }

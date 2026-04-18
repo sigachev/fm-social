@@ -150,6 +150,32 @@ public class PostService {
         postRepository.save(post);
     }
 
+    /** Admin moderation: removes a post with an audit trail (who removed it, why). */
+    @Transactional
+    public PostResponse adminRemovePost(Long id, Long adminUserId, String reason) {
+        Post post = findPost(id);
+        post.setStatus(PostStatus.REMOVED);
+        post.setRemovedAt(OffsetDateTime.now());
+        post.setRemovedBy(adminUserId);
+        post.setRemovalReason(reason);
+        return toResponse(postRepository.save(post));
+    }
+
+    /** Admin moderation: restores a removed post and clears the removal audit fields. */
+    @Transactional
+    public PostResponse adminRestorePost(Long id, Long adminUserId) {
+        Post post = findPost(id);
+        if (post.getStatus() != PostStatus.REMOVED) {
+            throw new ResponseStatusException(org.springframework.http.HttpStatus.CONFLICT,
+                    "Post is not removed");
+        }
+        post.setStatus(PostStatus.ACTIVE);
+        post.setRemovedAt(null);
+        post.setRemovedBy(null);
+        post.setRemovalReason(null);
+        return toResponse(postRepository.save(post));
+    }
+
     /** Legacy page-based query — kept for internal use; prefer getUserPostsFeed for API responses. */
     public PageResponse<PostResponse> getPostsByUser(Long authorId, Pageable pageable) {
         return PageResponse.from(postRepository.findActiveByAuthorId(authorId, pageable).map(this::toResponse));

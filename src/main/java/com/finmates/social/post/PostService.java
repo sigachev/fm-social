@@ -125,6 +125,11 @@ public class PostService {
         return toResponse(findActivePost(id));
     }
 
+    /** Admin preview — returns post regardless of status (including REMOVED). */
+    public PostResponse getPostForAdmin(Long id) {
+        return toResponse(findPost(id));
+    }
+
     @Transactional
     public PostResponse updatePost(Long id, Long currentUserId, PostUpdateRequest req) {
         Post post = findPost(id);

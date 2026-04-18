@@ -1,5 +1,6 @@
 package com.finmates.social.report;
 
+import com.finmates.social.client.UserLookupCache;
 import com.finmates.social.common.PageResponse;
 import com.finmates.social.common.exception.ForbiddenActionException;
 import com.finmates.social.common.exception.ResourceNotFoundException;
@@ -31,6 +32,7 @@ public class ReportService {
     private final ReportRepository reportRepository;
     private final PostRepository postRepository;
     private final CommentRepository commentRepository;
+    private final UserLookupCache userLookupCache;
 
     /**
      * Per-user daily report count cache — avoids a COUNT query on every submission.
@@ -43,10 +45,12 @@ public class ReportService {
 
     public ReportService(ReportRepository reportRepository,
                          PostRepository postRepository,
-                         CommentRepository commentRepository) {
+                         CommentRepository commentRepository,
+                         UserLookupCache userLookupCache) {
         this.reportRepository = reportRepository;
         this.postRepository = postRepository;
         this.commentRepository = commentRepository;
+        this.userLookupCache = userLookupCache;
     }
 
     @Transactional
@@ -92,12 +96,16 @@ public class ReportService {
 
     // ── Admin / internal operations ───────────────────────────────────────────
 
-    public PageResponse<ReportResponse> getReports(ReportStatus status, int page, int size) {
+    public PageResponse<ReportResponse> getReports(ReportStatus status, ReportReason reason, int page, int size) {
         size = Math.min(size, 100);
         var pageable = PageRequest.of(page, size);
-        var results = status != null
-                ? reportRepository.findByStatusOrderByCreatedAtDesc(status, pageable)
-                : reportRepository.findAllByOrderByCreatedAtDesc(pageable);
+        var results = (status != null && reason != null)
+                ? reportRepository.findByStatusAndReasonOrderByCreatedAtDesc(status, reason, pageable)
+                : status != null
+                        ? reportRepository.findByStatusOrderByCreatedAtDesc(status, pageable)
+                        : reason != null
+                                ? reportRepository.findByReasonOrderByCreatedAtDesc(reason, pageable)
+                                : reportRepository.findAllByOrderByCreatedAtDesc(pageable);
         return PageResponse.from(results.map(this::toResponse));
     }
 
@@ -162,9 +170,13 @@ public class ReportService {
     }
 
     public ReportResponse toResponse(Report report) {
+        String reporterUsername = userLookupCache.getByUserId(report.getReporterId())
+                .map(UserLookupCache.UserSummary::username)
+                .orElse(null);
         return new ReportResponse(
                 report.getId(),
                 report.getReporterId(),
+                reporterUsername,
                 report.getTargetType(),
                 report.getTargetId(),
                 report.getReason(),

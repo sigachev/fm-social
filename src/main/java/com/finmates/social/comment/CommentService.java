@@ -63,6 +63,11 @@ public class CommentService {
         return toResponse(findActiveComment(id));
     }
 
+    /** Admin preview — returns comment regardless of status (including REMOVED). */
+    public CommentResponse getCommentForAdmin(Long id) {
+        return toResponse(findComment(id));
+    }
+
     @Transactional
     public CommentResponse updateComment(Long id, Long currentUserId, CommentUpdateRequest req) {
         Comment comment = findComment(id);

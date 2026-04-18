@@ -22,6 +22,16 @@ public class PostInternalController {
     }
 
     /**
+     * Get any post by ID regardless of status — used by admin to preview reported content.
+     * Returns REMOVED posts (unlike the public endpoint which returns 404 for removed posts).
+     */
+    @GetMapping("/{id}")
+    @Operation(summary = "Get post by ID (admin preview — includes removed posts)")
+    public PostResponse getPost(@PathVariable Long id) {
+        return postService.getPostForAdmin(id);
+    }
+
+    /**
      * Admin-remove a post: sets status=REMOVED and records who removed it and why.
      * Unlike the user-delete endpoint, this records removal audit fields.
      */

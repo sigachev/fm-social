@@ -21,6 +21,16 @@ public class CommentInternalController {
         this.commentService = commentService;
     }
 
+    /**
+     * Get any comment by ID regardless of status — used by admin to preview reported content.
+     * Returns REMOVED comments (unlike the public endpoint which returns 404 for removed comments).
+     */
+    @GetMapping("/{id}")
+    @Operation(summary = "Get comment by ID (admin preview — includes removed comments)")
+    public CommentResponse getComment(@PathVariable Long id) {
+        return commentService.getCommentForAdmin(id);
+    }
+
     @PutMapping("/{id}/remove")
     @ResponseStatus(HttpStatus.OK)
     @Operation(summary = "Admin-remove a comment (sets status=REMOVED with audit trail)")

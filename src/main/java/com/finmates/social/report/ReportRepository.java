@@ -24,6 +24,12 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
     /** All reports regardless of status, newest first (admin). */
     Page<Report> findAllByOrderByCreatedAtDesc(Pageable pageable);
 
+    /** Admin queue: filter by reason only, newest first. */
+    Page<Report> findByReasonOrderByCreatedAtDesc(ReportReason reason, Pageable pageable);
+
+    /** Admin queue: filter by status AND reason, newest first. */
+    Page<Report> findByStatusAndReasonOrderByCreatedAtDesc(ReportStatus status, ReportReason reason, Pageable pageable);
+
     /** Count reports submitted by a user in the last 24 hours (rate-limit support). */
     @Query("SELECT COUNT(r) FROM Report r WHERE r.reporterId = :userId AND r.createdAt >= :since")
     long countByReporterIdSince(@Param("userId") Long userId, @Param("since") OffsetDateTime since);

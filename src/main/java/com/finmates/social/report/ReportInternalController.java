@@ -25,12 +25,13 @@ public class ReportInternalController {
     }
 
     @GetMapping
-    @Operation(summary = "List reports (admin) — filter by status")
+    @Operation(summary = "List reports (admin) — filter by status and/or reason")
     public PageResponse<ReportResponse> getReports(
             @RequestParam(required = false) ReportStatus status,
+            @RequestParam(required = false) ReportReason reason,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        return reportService.getReports(status, page, size);
+        return reportService.getReports(status, reason, page, size);
     }
 
     @GetMapping("/{id}")

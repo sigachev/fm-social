@@ -7,7 +7,7 @@ reactions, profile presentation, follow graph, blocks, moderation, and content r
 
 ## Prerequisites
 
-- Java 21
+- Java 21 
 - PostgreSQL 14+ with the `social` database created (see below)
 - Redis 7 (in Kubernetes dev namespace, or locally via Docker)
 

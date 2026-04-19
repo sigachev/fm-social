@@ -19,5 +19,8 @@ public record CommentResponse(
         int editCount,
         OffsetDateTime lastEditedAt,
         OffsetDateTime createdAt,
-        OffsetDateTime updatedAt
+        OffsetDateTime updatedAt,
+        OffsetDateTime removedAt,
+        String removalReason,
+        Long removedBy
 ) {}

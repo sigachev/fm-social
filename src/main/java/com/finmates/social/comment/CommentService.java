@@ -179,7 +179,10 @@ public class CommentService {
                 comment.getEditCount(),
                 comment.getLastEditedAt(),
                 comment.getCreatedAt(),
-                comment.getUpdatedAt()
+                comment.getUpdatedAt(),
+                comment.getRemovedAt(),
+                comment.getRemovalReason(),
+                comment.getRemovedBy()
         );
     }
 }

@@ -282,7 +282,10 @@ public class PostService {
                 post.getEditCount(),
                 post.getLastEditedAt(),
                 post.getCreatedAt(),
-                post.getUpdatedAt()
+                post.getUpdatedAt(),
+                post.getRemovedAt(),
+                post.getRemovalReason(),
+                post.getRemovedBy()
         );
     }
 }

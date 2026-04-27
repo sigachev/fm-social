@@ -4,6 +4,7 @@ import com.finmates.social.common.PageResponse;
 import com.finmates.social.common.security.AuthenticatedUser;
 import com.finmates.social.connections.ConnectionsPermissionService;
 import com.finmates.social.connections.Scope;
+import com.finmates.social.follow.dto.FollowOutcome;
 import com.finmates.social.follow.dto.FollowResponse;
 import com.finmates.social.follow.dto.FollowStatsResponse;
 import com.finmates.social.follow.dto.RelationshipResponse;
@@ -14,6 +15,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
@@ -36,17 +38,20 @@ public class FollowController {
     }
 
     @PostMapping("/{userId}")
-    @ResponseStatus(HttpStatus.CREATED)
     @Operation(summary = "Follow (or request to follow) a user",
             description = "If the target's profile is private, the row is created with status PENDING. " +
                     "Otherwise it goes ACTIVE and triggers feed backfill. Idempotent — re-following an " +
-                    "already-active or already-pending relationship returns the existing row, never a duplicate.")
-    @ApiResponse(responseCode = "201", description = "Now following (ACTIVE) or requested (PENDING) — see response.status")
+                    "already-active or already-pending relationship returns the existing row, never a duplicate. " +
+                    "The HTTP status distinguishes the two paths: 201 on insert, 200 on idempotent return.")
+    @ApiResponse(responseCode = "201", description = "Follow row created — status is ACTIVE for public targets, PENDING for private")
+    @ApiResponse(responseCode = "200", description = "Idempotent — relationship already existed; returns the existing row unchanged")
     @ApiResponse(responseCode = "403", description = "Cannot follow yourself, or a block exists between these users")
     @ApiResponse(responseCode = "404", description = "Target user has no profile")
-    public FollowResponse follow(@PathVariable Long userId) {
+    public ResponseEntity<FollowResponse> follow(@PathVariable Long userId) {
         Long followerId = authenticatedUser.currentUserId();
-        return followService.follow(followerId, userId);
+        FollowOutcome outcome = followService.follow(followerId, userId);
+        HttpStatus status = outcome.created() ? HttpStatus.CREATED : HttpStatus.OK;
+        return ResponseEntity.status(status).body(outcome.response());
     }
 
     @DeleteMapping("/{userId}")

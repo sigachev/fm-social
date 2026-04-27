@@ -5,6 +5,7 @@ import com.finmates.social.common.PageResponse;
 import com.finmates.social.common.exception.ForbiddenActionException;
 import com.finmates.social.common.exception.ResourceNotFoundException;
 import com.finmates.social.feed.FeedService;
+import com.finmates.social.follow.dto.FollowOutcome;
 import com.finmates.social.follow.dto.FollowResponse;
 import com.finmates.social.follow.dto.FollowStatsResponse;
 import com.finmates.social.follow.dto.RelationshipResponse;
@@ -43,16 +44,19 @@ public class FollowService {
      * Follow another user.
      *
      * <p>Idempotency: if any row already exists for {@code (followerId, followedId)} — whether
-     * ACTIVE or PENDING — returns it unchanged. Re-follow is never an error and never
-     * creates a duplicate row.</p>
+     * ACTIVE or PENDING — returns it unchanged with {@code created=false}. Re-follow is never
+     * an error and never creates a duplicate row.</p>
      *
      * <p>Privacy: if the target's {@code Profile.isPrivate} is true, the row is created with
      * status {@code PENDING}; otherwise {@code ACTIVE}. Public follows fire a feed backfill
      * via {@link FeedService#onFollowActivated} so the new follower sees the followee's
      * recent posts immediately.</p>
+     *
+     * @return a {@link FollowOutcome} with {@code created} signalling create-vs-idempotent,
+     *         used by the controller to pick {@code 201 Created} vs {@code 200 OK}.
      */
     @Transactional
-    public FollowResponse follow(Long followerId, Long followedId) {
+    public FollowOutcome follow(Long followerId, Long followedId) {
         if (followerId.equals(followedId)) {
             throw new ForbiddenActionException("Cannot follow yourself");
         }
@@ -63,7 +67,7 @@ public class FollowService {
         // Idempotency: existing row (either status) → return as-is, no DB churn.
         Optional<Follow> existing = followRepository.findByFollowerIdAndFollowedId(followerId, followedId);
         if (existing.isPresent()) {
-            return toResponse(existing.get());
+            return new FollowOutcome(false, toResponse(existing.get()));
         }
 
         // Decide initial status from target profile's privacy flag. Missing profile fails closed
@@ -83,7 +87,7 @@ public class FollowService {
         if (initialStatus == FollowStatus.ACTIVE) {
             feedService.onFollowActivated(followerId, followedId);
         }
-        return toResponse(saved);
+        return new FollowOutcome(true, toResponse(saved));
     }
 
     /**

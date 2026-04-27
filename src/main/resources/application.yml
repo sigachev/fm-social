@@ -40,7 +40,7 @@ management:
         include: health,info,metrics
   endpoint:
     health:
-      show-details: when-authorized
+      show-details: always
 
 springdoc:
   swagger-ui:

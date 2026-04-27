@@ -2,9 +2,12 @@ package com.finmates.social.feed;
 
 import com.finmates.social.follow.FollowRepository;
 import com.finmates.social.post.Post;
+import com.finmates.social.post.PostRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -28,10 +31,14 @@ import java.util.stream.Collectors;
 public class FeedService {
 
     private final FollowRepository followRepository;
+    private final PostRepository postRepository;
     private final RedisTemplate<String, String> redisTemplate;
 
     @Value("${finmates.feed.max-entries-per-user:1000}")
     private int maxEntriesPerUser;
+
+    @Value("${finmates.feed.backfill-on-activate-count:50}")
+    private int backfillOnActivateCount;
 
     private static String feedKey(Long userId) {
         return "feed:user:" + userId;
@@ -101,6 +108,43 @@ public class FeedService {
         } catch (Exception e) {
             log.warn("Feed read failed for user {}: {}", userId, e.getMessage());
             return Collections.emptyList();
+        }
+    }
+
+    /**
+     * Backfill the follower's feed with the followee's recent posts when a follow becomes ACTIVE.
+     *
+     * <p>Called from {@link com.finmates.social.follow.FollowService} after either a fresh
+     * follow against a public profile, an explicit accept of a pending request, or a
+     * private→public privacy flip's auto-accept loop. The number of posts is bounded by
+     * {@code finmates.feed.backfill-on-activate-count} (default 50).</p>
+     *
+     * <p>Best-effort: any Redis or DB failure is logged at WARN and swallowed. The follow
+     * row has already been committed by the caller's transaction; a stale feed will catch up
+     * on the next post fan-out.</p>
+     *
+     * @param followerId the user whose feed to extend
+     * @param followeeId the user whose recent posts to fan in
+     */
+    public void onFollowActivated(Long followerId, Long followeeId) {
+        try {
+            Pageable limit = PageRequest.of(0, backfillOnActivateCount);
+            List<Post> recent = postRepository.findActiveByAuthorIdDesc(followeeId, limit);
+            if (recent.isEmpty()) {
+                return;
+            }
+            String key = feedKey(followerId);
+            for (Post post : recent) {
+                double score = post.getCreatedAt() != null
+                        ? post.getCreatedAt().toInstant().toEpochMilli()
+                        : System.currentTimeMillis();
+                pushToFeed(key, String.valueOf(post.getId()), score);
+            }
+            log.debug("Backfilled {} posts from user {} into user {}'s feed",
+                    recent.size(), followeeId, followerId);
+        } catch (Exception e) {
+            log.warn("Feed backfill failed for follower={} followee={}: {}",
+                    followerId, followeeId, e.getMessage());
         }
     }
 

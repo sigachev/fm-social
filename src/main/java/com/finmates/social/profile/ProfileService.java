@@ -6,9 +6,11 @@ import com.finmates.social.client.UserLookupCache;
 import com.finmates.social.common.exception.ForbiddenActionException;
 import com.finmates.social.common.exception.ResourceNotFoundException;
 import com.finmates.social.follow.FollowRepository;
+import com.finmates.social.follow.FollowService;
 import com.finmates.social.follow.FollowStatus;
 import com.finmates.social.post.PostRepository;
 import com.finmates.social.post.PostStatus;
+import com.finmates.social.profile.dto.PrivacyUpdateResponse;
 import com.finmates.social.profile.dto.ProfilePublicResponse;
 import com.finmates.social.profile.dto.ProfileResponse;
 import com.finmates.social.profile.dto.ProfileUpdateRequest;
@@ -36,6 +38,7 @@ public class ProfileService {
 
     private final ProfileRepository profileRepository;
     private final FollowRepository followRepository;
+    private final FollowService followService;
     private final BlockRepository blockRepository;
     private final PostRepository postRepository;
     private final S3Service s3Service;
@@ -43,12 +46,14 @@ public class ProfileService {
 
     public ProfileService(ProfileRepository profileRepository,
                           FollowRepository followRepository,
+                          FollowService followService,
                           BlockRepository blockRepository,
                           PostRepository postRepository,
                           S3Service s3Service,
                           @Qualifier("cryptoServiceWebClient") WebClient cryptoServiceWebClient) {
         this.profileRepository = profileRepository;
         this.followRepository = followRepository;
+        this.followService = followService;
         this.blockRepository = blockRepository;
         this.postRepository = postRepository;
         this.s3Service = s3Service;
@@ -138,6 +143,52 @@ public class ProfileService {
             }
             case PUBLIC -> toFilteredPublicResponse(profile, true, true);
         };
+    }
+
+    /**
+     * Toggle the connection-privacy flag on the caller's profile.
+     *
+     * <p>Privacy semantics:</p>
+     * <ul>
+     *   <li><b>{@code true → false}</b> (going public): all PENDING incoming follow requests
+     *       are auto-accepted in the same transaction, and each promoted relationship fires a
+     *       feed backfill so the new follower sees the caller's recent posts immediately.</li>
+     *   <li><b>{@code false → true}</b> (going private): existing ACTIVE follows are
+     *       intentionally NOT touched. Only <em>new</em> follow attempts will be created with
+     *       status PENDING. This is by design — flipping to private should not silently
+     *       disconnect users who already have an established relationship; if the caller
+     *       wants that, they must remove followers explicitly.</li>
+     *   <li>No-op flips (true→true, false→false) write nothing and return autoAcceptedCount=0.</li>
+     * </ul>
+     *
+     * <p>Single transactional op: the privacy-flag write and the bulk PENDING→ACTIVE flip both
+     * commit atomically (Spring propagation REQUIRED through {@link FollowService#autoAcceptAllPending}).
+     * The Redis feed-backfill calls run inside the same method but are best-effort — Redis failure
+     * does NOT roll back the DB transaction (matches the established post-fan-out pattern).</p>
+     */
+    @Transactional
+    @CacheEvict(value = "profileCache", key = "#userId")
+    public PrivacyUpdateResponse updatePrivacy(Long userId, boolean newIsPrivate) {
+        Profile profile = profileRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("Profile not found for user: " + userId));
+
+        boolean wasPrivate = profile.isPrivate();
+        if (wasPrivate == newIsPrivate) {
+            return new PrivacyUpdateResponse(newIsPrivate, 0);
+        }
+
+        profile.setPrivate(newIsPrivate);
+        profileRepository.save(profile);
+
+        int autoAccepted = 0;
+        if (wasPrivate && !newIsPrivate) {
+            // private → public: auto-accept everything that was waiting on approval.
+            autoAccepted = followService.autoAcceptAllPending(userId);
+        }
+        // public → private: no retroactive change to existing ACTIVE follows.
+        // Only new follow attempts (handled in FollowService.follow) will go to PENDING from now on.
+
+        return new PrivacyUpdateResponse(newIsPrivate, autoAccepted);
     }
 
     // ── Mapping ───────────────────────────────────────────────────────────────

@@ -2,6 +2,8 @@ package com.finmates.social.profile;
 
 import com.finmates.social.client.UserLookupCache;
 import com.finmates.social.common.security.AuthenticatedUser;
+import com.finmates.social.profile.dto.PrivacyUpdateRequest;
+import com.finmates.social.profile.dto.PrivacyUpdateResponse;
 import com.finmates.social.profile.dto.ProfilePublicResponse;
 import com.finmates.social.profile.dto.ProfileResponse;
 import com.finmates.social.profile.dto.ProfileSummaryResponse;
@@ -54,6 +56,23 @@ public class ProfileController {
     public ProfileResponse updateOwnProfile(@Valid @RequestBody ProfileUpdateRequest req) {
         Long userId = authenticatedUser.currentUserId();
         return profileService.updateProfile(userId, req);
+    }
+
+    @PatchMapping("/me/privacy")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(
+            summary = "Toggle connection-privacy on the current profile",
+            description = "Flipping {@code true → false} (going public) auto-accepts ALL pending incoming "
+                    + "follow requests in a single transaction and fans the caller's recent posts into "
+                    + "each new follower's feed. Flipping {@code false → true} (going private) does NOT "
+                    + "retroactively touch existing ACTIVE follows — only new follow attempts will be "
+                    + "created with status PENDING. No-op flips return autoAcceptedCount=0."
+    )
+    @ApiResponse(responseCode = "200", description = "Privacy applied; autoAcceptedCount > 0 when going public with pending requests")
+    @ApiResponse(responseCode = "404", description = "Profile not found for current user")
+    public PrivacyUpdateResponse updatePrivacy(@Valid @RequestBody PrivacyUpdateRequest req) {
+        Long userId = authenticatedUser.currentUserId();
+        return profileService.updatePrivacy(userId, req.isPrivate());
     }
 
     @GetMapping("/{userId}")

@@ -132,6 +132,24 @@ public class Profile {
     @Column(name = "allow_messages", nullable = false, length = 20)
     private AllowMessages allowMessages = AllowMessages.EVERYONE;
 
+    /**
+     * V16 — gates whether new follow requests need approval.
+     *
+     * <p>{@code true}: incoming follow requests are persisted as
+     * {@link com.finmates.social.follow.FollowStatus#PENDING} until the followee accepts.
+     * {@code false}: follows go straight to {@link com.finmates.social.follow.FollowStatus#ACTIVE}.</p>
+     *
+     * <p>Distinct from {@link #profileVisibility}: {@code is_private} is about the
+     * <em>follow gate</em> only. PROFILE_BASIC viewing (rendering a profile card so a
+     * stranger can hit "Request to follow") is always allowed regardless of {@code is_private}.
+     * Field-level filtering still flows through {@code profileVisibility}.</p>
+     *
+     * <p>When this flips {@code true → false}, all currently-PENDING incoming requests
+     * are auto-accepted (transitioned to ACTIVE) — see ProfileService (Phase 3).</p>
+     */
+    @Column(name = "is_private", nullable = false)
+    private boolean isPrivate = false;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 

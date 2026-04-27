@@ -2,6 +2,8 @@ package com.finmates.social.follow;
 
 import com.finmates.social.common.PageResponse;
 import com.finmates.social.common.security.AuthenticatedUser;
+import com.finmates.social.connections.ConnectionsPermissionService;
+import com.finmates.social.connections.Scope;
 import com.finmates.social.follow.dto.FollowResponse;
 import com.finmates.social.follow.dto.RelationshipResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -22,10 +24,14 @@ public class FollowController {
 
     private final FollowService followService;
     private final AuthenticatedUser authenticatedUser;
+    private final ConnectionsPermissionService permissionService;
 
-    public FollowController(FollowService followService, AuthenticatedUser authenticatedUser) {
+    public FollowController(FollowService followService,
+                            AuthenticatedUser authenticatedUser,
+                            ConnectionsPermissionService permissionService) {
         this.followService = followService;
         this.authenticatedUser = authenticatedUser;
+        this.permissionService = permissionService;
     }
 
     @PostMapping("/{userId}")
@@ -73,10 +79,14 @@ public class FollowController {
 
     @GetMapping("/{userId}/following")
     @Operation(summary = "Users a given user is following (paginated)")
+    @ApiResponse(responseCode = "200", description = "Following list")
+    @ApiResponse(responseCode = "403", description = "Target profile is private and viewer is not a mate")
     public PageResponse<FollowResponse> getUserFollowing(
             @PathVariable Long userId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
+        Long viewerId = authenticatedUser.currentUserId();
+        permissionService.requireCanView(viewerId, userId, Scope.FOLLOW_LISTS);
         size = Math.min(size, 100);
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
         return followService.getFollowing(userId, pageable);
@@ -84,10 +94,14 @@ public class FollowController {
 
     @GetMapping("/{userId}/followers")
     @Operation(summary = "Users following a given user (paginated)")
+    @ApiResponse(responseCode = "200", description = "Followers list")
+    @ApiResponse(responseCode = "403", description = "Target profile is private and viewer is not a mate")
     public PageResponse<FollowResponse> getUserFollowers(
             @PathVariable Long userId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
+        Long viewerId = authenticatedUser.currentUserId();
+        permissionService.requireCanView(viewerId, userId, Scope.FOLLOW_LISTS);
         size = Math.min(size, 100);
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
         return followService.getFollowers(userId, pageable);

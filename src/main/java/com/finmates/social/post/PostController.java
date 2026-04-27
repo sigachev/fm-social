@@ -1,6 +1,8 @@
 package com.finmates.social.post;
 
 import com.finmates.social.common.security.AuthenticatedUser;
+import com.finmates.social.connections.ConnectionsPermissionService;
+import com.finmates.social.connections.Scope;
 import com.finmates.social.feed.FeedResponse;
 import com.finmates.social.moderation.UserBanCheckService;
 import com.finmates.social.post.dto.PostCreateRequest;
@@ -23,13 +25,16 @@ public class PostController {
     private final PostService postService;
     private final AuthenticatedUser authenticatedUser;
     private final UserBanCheckService userBanCheckService;
+    private final ConnectionsPermissionService permissionService;
 
     public PostController(PostService postService,
                           AuthenticatedUser authenticatedUser,
-                          UserBanCheckService userBanCheckService) {
+                          UserBanCheckService userBanCheckService,
+                          ConnectionsPermissionService permissionService) {
         this.postService = postService;
         this.authenticatedUser = authenticatedUser;
         this.userBanCheckService = userBanCheckService;
+        this.permissionService = permissionService;
     }
 
     @PostMapping
@@ -77,10 +82,13 @@ public class PostController {
     @GetMapping("/user/{userId}")
     @Operation(summary = "List active posts by a user (cursor-based, same shape as /api/feed)")
     @ApiResponse(responseCode = "200", description = "Feed-shaped response: { posts, nextCursor, hasMore }")
+    @ApiResponse(responseCode = "403", description = "Target profile is private and viewer is not a mate")
     public FeedResponse getPostsByUser(
             @PathVariable Long userId,
             @RequestParam(required = false) Long cursor,
             @RequestParam(defaultValue = "20") int limit) {
+        Long viewerId = authenticatedUser.currentUserId();
+        permissionService.requireCanView(viewerId, userId, Scope.FEED);
         limit = Math.min(limit, 50);
         return postService.getUserPostsFeed(userId, cursor, limit);
     }

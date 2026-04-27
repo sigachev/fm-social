@@ -6,6 +6,7 @@ import com.finmates.social.client.UserLookupCache;
 import com.finmates.social.common.exception.ForbiddenActionException;
 import com.finmates.social.common.exception.ResourceNotFoundException;
 import com.finmates.social.follow.FollowRepository;
+import com.finmates.social.follow.FollowStatus;
 import com.finmates.social.post.PostRepository;
 import com.finmates.social.post.PostStatus;
 import com.finmates.social.profile.dto.ProfilePublicResponse;
@@ -128,8 +129,11 @@ public class ProfileService {
         return switch (profile.getProfileVisibility()) {
             case PRIVATE -> throw new ForbiddenActionException("This profile is private");
             case FOLLOWERS -> {
+                // V16: PENDING requesters must NOT yet see FOLLOWERS-mode profile fields.
+                // Full consolidation onto ConnectionsPermissionService is Phase 3.
                 boolean isFollowing = viewerId != null &&
-                        followRepository.existsByFollowerIdAndFollowedId(viewerId, targetUserId);
+                        followRepository.existsByFollowerIdAndFollowedIdAndStatus(
+                                viewerId, targetUserId, FollowStatus.ACTIVE);
                 yield toFilteredPublicResponse(profile, isFollowing, isFollowing);
             }
             case PUBLIC -> toFilteredPublicResponse(profile, true, true);
@@ -271,8 +275,11 @@ public class ProfileService {
         long followersCount = followRepository.countByFollowedId(targetUserId);
         long followingCount = followRepository.countByFollowerId(targetUserId);
 
+        // V16: PENDING requesters must NOT yet see FOLLOWERS-mode profile fields.
+        // Full consolidation onto ConnectionsPermissionService is Phase 3.
         boolean isFollowing = viewerId != null
-                && followRepository.existsByFollowerIdAndFollowedId(viewerId, targetUserId);
+                && followRepository.existsByFollowerIdAndFollowedIdAndStatus(
+                        viewerId, targetUserId, FollowStatus.ACTIVE);
         boolean isBlocked = viewerId != null
                 && blockRepository.existsBlockInEitherDirection(viewerId, targetUserId);
 

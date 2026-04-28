@@ -251,6 +251,7 @@ public class ProfileService {
                 p.getTwitterHandle(), p.getDiscordHandle(), p.getTelegramHandle(),
                 p.getInstagramHandle(), p.getFacebookHandle(), p.getLinkedinHandle(), p.getWhatsappHandle(),
                 p.getProfileVisibility(), p.getPortfolioVisibility(),
+                p.isPrivate(),
                 p.isShowPnl(), p.isShowPositions(), p.isShowLocation(), p.isShowRealName(),
                 p.isShowTradingActivity(), p.isShowTradeHistory(), p.isShowOnlineStatus(),
                 p.isShowInLeaderboard(), p.isAllowFollowers(), p.isAllowCopyTrading(),

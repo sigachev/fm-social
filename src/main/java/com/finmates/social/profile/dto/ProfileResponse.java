@@ -38,6 +38,8 @@ public record ProfileResponse(
         String whatsappHandle,
         ProfileVisibility profileVisibility,
         PortfolioVisibility portfolioVisibility,
+        /** Connection-privacy flag (V16). True = new follows go to PENDING; false = ACTIVE immediately. */
+        boolean isPrivate,
         boolean showPnl,
         boolean showPositions,
         boolean showLocation,

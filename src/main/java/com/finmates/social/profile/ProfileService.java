@@ -42,6 +42,7 @@ public class ProfileService {
     private final BlockRepository blockRepository;
     private final PostRepository postRepository;
     private final S3Service s3Service;
+    private final UserLookupCache userLookupCache;
     private final WebClient cryptoServiceWebClient;
 
     public ProfileService(ProfileRepository profileRepository,
@@ -50,6 +51,7 @@ public class ProfileService {
                           BlockRepository blockRepository,
                           PostRepository postRepository,
                           S3Service s3Service,
+                          UserLookupCache userLookupCache,
                           @Qualifier("cryptoServiceWebClient") WebClient cryptoServiceWebClient) {
         this.profileRepository = profileRepository;
         this.followRepository = followRepository;
@@ -57,6 +59,7 @@ public class ProfileService {
         this.blockRepository = blockRepository;
         this.postRepository = postRepository;
         this.s3Service = s3Service;
+        this.userLookupCache = userLookupCache;
         this.cryptoServiceWebClient = cryptoServiceWebClient;
     }
 
@@ -405,7 +408,16 @@ public class ProfileService {
                 .map(p -> new com.finmates.social.profile.dto.ProfileSummaryResponse(
                         p.getUserId(),
                         p.getDisplayName(),
-                        resolveAvatarUrl(p)
+                        resolveAvatarUrl(p),
+                        // Phase 5.0: per-id loop against UserLookupCache (5-min Caffeine TTL,
+                        // 10k entries). Cache hits are free; misses fall through to
+                        // finmates-main /internal/users/{id}/summary — same path the existing
+                        // ProfileController.getPublicProfileByUsername already uses. No bulk
+                        // lookup helper exists yet; for batches up to 200 the loop is fine.
+                        userLookupCache.getByUserId(p.getUserId())
+                                .map(com.finmates.social.client.UserLookupCache.UserSummary::username)
+                                .orElse(null),
+                        p.isPrivate()
                 ))
                 .toList();
     }

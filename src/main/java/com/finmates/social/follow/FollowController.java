@@ -124,55 +124,63 @@ public class FollowController {
     }
 
     @GetMapping("/me/following")
-    @Operation(summary = "Users I am following (paginated)")
+    @Operation(summary = "Users I am following (paginated)",
+            description = "Set matesOnly=true to restrict the result to mutual ACTIVE follows (mates).")
     public PageResponse<FollowResponse> getMyFollowing(
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "false") boolean matesOnly) {
         Long userId = authenticatedUser.currentUserId();
         size = Math.min(size, 100);
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
-        return followService.getFollowing(userId, pageable);
+        return followService.getFollowing(userId, pageable, matesOnly);
     }
 
     @GetMapping("/me/followers")
-    @Operation(summary = "Users following me (paginated)")
+    @Operation(summary = "Users following me (paginated)",
+            description = "Set matesOnly=true to restrict the result to mutual ACTIVE follows (mates).")
     public PageResponse<FollowResponse> getMyFollowers(
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "false") boolean matesOnly) {
         Long userId = authenticatedUser.currentUserId();
         size = Math.min(size, 100);
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
-        return followService.getFollowers(userId, pageable);
+        return followService.getFollowers(userId, pageable, matesOnly);
     }
 
     @GetMapping("/{userId}/following")
-    @Operation(summary = "Users a given user is following (paginated)")
+    @Operation(summary = "Users a given user is following (paginated)",
+            description = "Set matesOnly=true to restrict the result to mutual ACTIVE follows (mates).")
     @ApiResponse(responseCode = "200", description = "Following list")
     @ApiResponse(responseCode = "403", description = "Target profile is private and viewer is not a mate")
     public PageResponse<FollowResponse> getUserFollowing(
             @PathVariable Long userId,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "false") boolean matesOnly) {
         Long viewerId = authenticatedUser.currentUserId();
         permissionService.requireCanView(viewerId, userId, Scope.FOLLOW_LISTS);
         size = Math.min(size, 100);
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
-        return followService.getFollowing(userId, pageable);
+        return followService.getFollowing(userId, pageable, matesOnly);
     }
 
     @GetMapping("/{userId}/followers")
-    @Operation(summary = "Users following a given user (paginated)")
+    @Operation(summary = "Users following a given user (paginated)",
+            description = "Set matesOnly=true to restrict the result to mutual ACTIVE follows (mates).")
     @ApiResponse(responseCode = "200", description = "Followers list")
     @ApiResponse(responseCode = "403", description = "Target profile is private and viewer is not a mate")
     public PageResponse<FollowResponse> getUserFollowers(
             @PathVariable Long userId,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "false") boolean matesOnly) {
         Long viewerId = authenticatedUser.currentUserId();
         permissionService.requireCanView(viewerId, userId, Scope.FOLLOW_LISTS);
         size = Math.min(size, 100);
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
-        return followService.getFollowers(userId, pageable);
+        return followService.getFollowers(userId, pageable, matesOnly);
     }
 
     @GetMapping("/me/relationship/{userId}")

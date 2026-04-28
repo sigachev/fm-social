@@ -195,14 +195,32 @@ public class FollowService {
         return new FollowStatsResponse(followers, following, pendingIncoming, pendingOutgoing, mates);
     }
 
+    /**
+     * Active follows where {@code userId} is the follower.
+     *
+     * @param matesOnly when true, restrict to mutual ACTIVE follows (mates) — uses the
+     *                  {@link FollowRepository#findActiveFollowingMatesOnly} query added in Phase 2.
+     */
     @Transactional(readOnly = true)
-    public PageResponse<FollowResponse> getFollowing(Long userId, Pageable pageable) {
-        return PageResponse.from(followRepository.findByFollowerId(userId, pageable).map(this::toResponse));
+    public PageResponse<FollowResponse> getFollowing(Long userId, Pageable pageable, boolean matesOnly) {
+        var page = matesOnly
+                ? followRepository.findActiveFollowingMatesOnly(userId, pageable)
+                : followRepository.findByFollowerId(userId, pageable);
+        return PageResponse.from(page.map(this::toResponse));
     }
 
+    /**
+     * Active follows where {@code userId} is the followee.
+     *
+     * @param matesOnly when true, restrict to mutual ACTIVE follows (mates) — uses the
+     *                  {@link FollowRepository#findActiveFollowersMatesOnly} query added in Phase 2.
+     */
     @Transactional(readOnly = true)
-    public PageResponse<FollowResponse> getFollowers(Long userId, Pageable pageable) {
-        return PageResponse.from(followRepository.findByFollowedId(userId, pageable).map(this::toResponse));
+    public PageResponse<FollowResponse> getFollowers(Long userId, Pageable pageable, boolean matesOnly) {
+        var page = matesOnly
+                ? followRepository.findActiveFollowersMatesOnly(userId, pageable)
+                : followRepository.findByFollowedId(userId, pageable);
+        return PageResponse.from(page.map(this::toResponse));
     }
 
     /**

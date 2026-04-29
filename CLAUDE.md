@@ -299,6 +299,33 @@ Internal endpoints that fm-social will expose for finmates-main and finmates-cry
 - `GET /internal/v1/follows/count?userId=` — follower/following counts
 - `POST /internal/v1/profiles` — create profile on new user registration
 
+### Internal Follow API (CP5(c) Phase 1 — 2026-04-29)
+
+`FollowsInternalController` at `/api/internal/follows/*`. Auth: `X-Internal-Secret`
+header (validated by existing `InternalSecretFilter`). All endpoints fail-loud on
+DB error (no fail-open) and return 200 with empty payload — never 404 — when a user
+has no rows.
+
+| Method | Path | Response | Repo backing |
+|--------|------|----------|--------------|
+| GET | `/api/internal/follows/mates?userId=X` | `Set<Long>` | `findAllMateIds` (NEW) |
+| GET | `/api/internal/follows/following?userId=X` | `Set<Long>` | `findAllFollowingIds` (NEW) |
+| GET | `/api/internal/follows/followers?userId=X` | `Set<Long>` | `findAllFollowerIds` (existing) |
+| GET | `/api/internal/follows/followers-summary?userId=X` | `{totalCount, recent: [{userId, createdAt}]}` (recent capped at 50) | `countByFollowedIdAndStatus` + `findRecentFollowers` (NEW) |
+
+Cache: `internal-follows` Caffeine cache, 60s TTL, 10k max entries; per-endpoint
+key prefixes (`mates:` / `following:` / `followers:` / `summary:`) on a single shared
+cache name. TTL aligns with the planned main-side `FmSocialClient` cache (cp5-c-design.md §2e).
+
+Callers: planned in CP5(c) — finmates-main `FmSocialClient` (3 handler migrations behind
+`finmates.fm-social.enabled` flag) and finmates-crypto `FmSocialClient` (mate-lookup
+re-point). Currently no live callers — this is a dead-code release until step 2.
+
+**Index coverage caveat:** `findAllMateIds` does a self-join on `(follower_id, status)`
+and `(followed_id, status)`. EXPLAIN ANALYZE against staging is a prerequisite before
+merge; if a sequential scan is detected, add composite indexes
+`(follower_id, status, followed_id)` and the symmetric variant in a CP5-c-pre migration.
+
 ## Config Classes
 
 | Class | Package | Purpose |

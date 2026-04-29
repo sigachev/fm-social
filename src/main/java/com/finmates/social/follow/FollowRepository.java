@@ -148,6 +148,51 @@ public interface FollowRepository extends JpaRepository<Follow, Long> {
             "            AND rf.followedId = :userId AND rf.status = com.finmates.social.follow.FollowStatus.ACTIVE)")
     List<Long> findMateIdsAmong(@Param("userId") Long userId, @Param("targetIds") Collection<Long> targetIds);
 
+    // ── CP5(c) internal-follows API additions ──────────────────────────────────
+
+    /**
+     * Returns ALL mate IDs (mutual ACTIVE follows in both directions) for the given user.
+     * Unbounded variant of {@link #findMateIdsAmong(Long, Collection)} — no targetIds filter.
+     * Used by {@code FollowsInternalController#mates} (CP5(c)).
+     */
+    @Query("SELECT f.followedId FROM Follow f " +
+            "WHERE f.followerId = :userId " +
+            "  AND f.status = com.finmates.social.follow.FollowStatus.ACTIVE " +
+            "  AND EXISTS (" +
+            "      SELECT 1 FROM Follow rf " +
+            "      WHERE rf.followerId = f.followedId " +
+            "        AND rf.followedId = :userId " +
+            "        AND rf.status = com.finmates.social.follow.FollowStatus.ACTIVE)")
+    java.util.Set<Long> findAllMateIds(@Param("userId") Long userId);
+
+    /**
+     * Returns IDs of all users that {@code userId} actively follows.
+     * Used by {@code FollowsInternalController#following} (CP5(c)).
+     */
+    @Query("SELECT f.followedId FROM Follow f " +
+            "WHERE f.followerId = :userId " +
+            "  AND f.status = com.finmates.social.follow.FollowStatus.ACTIVE")
+    java.util.Set<Long> findAllFollowingIds(@Param("userId") Long userId);
+
+    /**
+     * Recent followers projection for the followers-summary endpoint.
+     * Two-scalar projection avoids loading the full {@link Follow} entity.
+     */
+    interface FollowRecentView {
+        Long getFollowerId();
+        java.time.OffsetDateTime getCreatedAt();
+    }
+
+    /**
+     * Returns the most recent followers of {@code userId}, ordered by {@code createdAt DESC},
+     * paginated. Used by {@code FollowsInternalController#followersSummary} (CP5(c)).
+     */
+    @Query("SELECT f.followerId AS followerId, f.createdAt AS createdAt FROM Follow f " +
+            "WHERE f.followedId = :userId " +
+            "  AND f.status = com.finmates.social.follow.FollowStatus.ACTIVE " +
+            "ORDER BY f.createdAt DESC")
+    List<FollowRecentView> findRecentFollowers(@Param("userId") Long userId, Pageable pageable);
+
     // ── Deletes (status-agnostic — see audit notes) ────────────────────────────
 
     @Modifying

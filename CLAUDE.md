@@ -504,3 +504,10 @@ Cross-session memory via the `claude-mem` MCP plugin.
 2. timeline(anchor=ID)             → surrounding session context
 3. get_observations([ID1, ID2])    → full detail for needed IDs
 ```
+
+- PR-1 (fm-social internal-follows API): branch pushed
+  feat/cp5-c-internal-follows-api, NOT merged. Gate 0
+  (EXPLAIN ANALYZE on findAllMateIds) DEFERRED — must run against
+  staging before merge. Hand-verify query correctness in same
+  staging session. Cache-hit test and @DataJpaTest deferred as
+  follow-up cleanup tasks.

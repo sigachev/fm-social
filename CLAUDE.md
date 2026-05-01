@@ -140,6 +140,51 @@ OpenAPI JSON: `http://localhost:8091/v3/api-docs`
 | GET | `/api/profiles/{username}/public` | Public profile by username — no auth required; resolves via `UserLookupCache` (5-min TTL) |
 | GET | `/api/profiles/batch?ids=1,2,3` | **Batch profile summary lookup** — lightweight `{userId, displayName, avatarUrl}` for up to 200 users; intended for rendering avatars in comment/post lists; missing IDs omitted silently |
 
+### Following Activity Feed — `/api/feed/following` (added 2026-04-30)
+
+Sibling endpoint to the existing `/api/feed`. Surfaces a chronologically-ordered stream of `POSITION_OPENED` / `POSITION_CLOSED` events for users the viewer follows, with rolling-returns trader-performance metadata. Used by the dashboard's "Following Activity" widget.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/feed/following?limit=N` | Following-activity events; `limit` clamped to `[1, 50]`, default 20 |
+
+**Response shape — `List<FollowingActivityEvent>`** (record in `feed/dto/`):
+```
+{
+  eventId:    "{tradeId}-OPEN" | "{tradeId}-CLOSE",   // stable client React key
+  userId:     Long,
+  username:   String | null,                          // /u/:username navigation
+  avatarUrl:  String | null,                          // S3 URL (null → initials badge)
+  eventType:  "POSITION_OPENED" | "POSITION_CLOSED",
+  symbol:     String,                                 // /token/:symbol navigation
+  side:       "LONG" | "SHORT",                       // BUY/SELL normalized server-side
+  qty:        BigDecimal,
+  entryPrice: BigDecimal,
+  exitPrice:  BigDecimal | null,                      // null for OPENED
+  pnlPct:     BigDecimal | null,                      // null for OPENED; (realizedPnl / (entryPrice * qty)) * 100 for CLOSED
+  occurredAt: Instant,
+  traderPerf: { return1dPct, return1wPct, return1mPct }   // each field nullable — see contract below
+}
+```
+
+**Pipeline** (in `FollowingFeedService`): follow-graph (`FollowRepository.findAllFollowingIds`) → cross-service trades fetch (`cryptoServiceWebClient` → `GET /api/internal/trades/recent?userIds=…&limit=N×2`) → expand each closed trade into both OPENED and CLOSED events → sort by `occurredAt DESC` → page-cap → batch hydrate (`ProfileService.getBatchSummaries` + `CryptoPerformanceClient.getRollingReturnsBatch`). The 2× trades-fetch accounts for the worst-case OPEN+CLOSE expansion ratio.
+
+**Per-call cost ceiling**: 1 follow-graph query + 1 trades fetch + 1 profile-batch + 1 perf-batch = 4 cross-service-or-DB round trips per page, **regardless of `limit`**. The perf-batch fans out internally for cache-misses only; with both caches warm (5 min on the fm-social side, 24 h on the crypto side) it's an O(1) Caffeine lookup per event.
+
+**`traderPerf` null-on-insufficient-data contract**: each of `return1dPct` / `return1wPct` / `return1mPct` can be null. A field is null when the subject user has no `user_wallet_snapshots` row at-or-before the window cutoff (e.g. `return1mPct` is null on a user with <30 days of history). **Do NOT collapse null to `BigDecimal.ZERO`** — same contract as `cashBalance` in finmates-crypto's `PortfolioService.buildFullDto` and `PortfolioSocialController.getSummaryWithSocial`. The frontend renders `—` for null and `0.00%` for zero, and conflating "no data" with "flat" is a meaningfully different lie that compounds across UI surfaces. The `BigDecimal.ZERO` literal bug shipped on 2026-04-30 in the dashboard's social card is the cautionary tale; the canonical comment block at `finmates-crypto/src/main/java/com/finmates/controller/PortfolioSocialController.java:320-332` is the rationale to cite.
+
+**`CryptoPerformanceClient` — two-layer cache by design**:
+- **fm-social side** (this service): manual Caffeine, 5-min TTL, 50k max entries. A freshness floor — protects the user from stale numbers when crypto's day-long cache hasn't naturally expired yet but real activity has happened in the followed set.
+- **finmates-crypto side** (source of truth): Spring `@Cacheable("rollingReturns")`, 24-hour TTL, evicted at 00:05 UTC daily by `RollingReturnsCacheEvictionJob` (5 minutes after `PortfolioSnapshotJob` writes the day's snapshot row). This is where the actual cost-saving cache lives — rolling returns only change once a day.
+- **The two TTLs are intentionally different.** Don't try to "synchronize" them: the short fm-social TTL is a freshness floor, the long crypto TTL is the cost-saving cache. If they were the same, fm-social would re-query crypto on every cold local-cache hit even when crypto already has the value cached. If fm-social cached as long as crypto, a cleared crypto cache would be masked by stale fm-social entries.
+- **Outage handling**: `TraderPerf.EMPTY` (all-null sentinel) is returned **and cached** when crypto fails. This prevents a retry storm against a downed service — the next 5 minutes of requests for that user serve the cached EMPTY, then the cache expires and one request retries.
+
+**Architectural note — why crypto data lives in crypto, not fm-social**: rolling returns intentionally cross the service boundary via HTTP rather than fm-social adding a cross-DB read against `crypto.user_wallet_snapshots`. Reasons: (1) preserves the documented "each service owns its DB" invariant — only `fm-admin` is multi-DB and that's tracked as a special-case complexity; (2) reuses the existing `cryptoServiceWebClient` plumbing pattern (`/api/internal/users/{userId}/rolling-returns` is the third sibling endpoint on `InternalCryptoSocialController` after `/positions/win-rate` and `/trades/recent`); (3) avoids granting fm-social Postgres privileges on the crypto database. The HTTP hop is cheap (cached for 24 h source-side, 5 min consumer-side).
+
+**LAUNCH CAVEAT (2026-04-30)**: `crypto.user_wallet_snapshots` has only 7 days of accumulated history at deploy time (2026-04-23 to 2026-04-30, 4 distinct users). `return1d` works today; `return1w` works for users with ≥7 days; **`return1m` will be null for ALL users until 2026-05-23**. The em-dash render on the FE is correct — do not patch the backend or the FE to lie with zero. The data accumulates passively as the daily snapshot job continues to run.
+
+**Cache-mode for tests** (`src/test/resources/mockito-extensions/org.mockito.plugins.MockMaker`): set to `mock-maker-subclass` because Mockito's default inline mock-maker fails to instrument concrete services like `ProfileService` on Java 24 (the build target is Java 21 but local dev runs against JDK 24). Subclass-mode mocks work fine for everything fm-social tests do today; if you ever need to mock a `final` class or a static method, reconsider this setting.
+
 ### FollowController — `/api/follows`
 | Method | Path | Description |
 |--------|------|-------------|

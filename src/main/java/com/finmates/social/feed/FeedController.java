@@ -2,6 +2,7 @@ package com.finmates.social.feed;
 
 import com.finmates.social.block.BlockRepository;
 import com.finmates.social.common.security.AuthenticatedUser;
+import com.finmates.social.feed.dto.FollowingActivityEvent;
 import com.finmates.social.post.Post;
 import com.finmates.social.post.PostRepository;
 import com.finmates.social.post.PostService;
@@ -33,6 +34,7 @@ public class FeedController {
     private final PostService postService;
     private final BlockRepository blockRepository;
     private final AuthenticatedUser authenticatedUser;
+    private final FollowingFeedService followingFeedService;
 
     @GetMapping
     @Operation(summary = "Get personalized feed",
@@ -79,5 +81,28 @@ public class FeedController {
 
         boolean hasMore = postIds.size() == limit;
         return ResponseEntity.ok(new FeedResponse(responses, oldestTimestamp, hasMore));
+    }
+
+    /**
+     * GET /api/feed/following — trade-event activity feed for users the viewer follows.
+     *
+     * <p>Returns a chronologically-ordered list of {@link FollowingActivityEvent} rows
+     * spanning POSITION_OPENED and POSITION_CLOSED actions across the viewer's followed
+     * traders, each enriched with rolling-returns trader-performance metadata. Backed
+     * by {@link FollowingFeedService} — see that class's javadoc for the full pipeline
+     * (follow-graph → trades fetch → expand → sort → batch hydrate).
+     *
+     * <p>Pagination is intentionally simpler than {@code /api/feed} (no cursor): rolling
+     * activity changes too quickly for cursor-based pagination to feel right, and the
+     * widget on the dashboard renders a fixed-size page anyway. {@code limit} is
+     * server-clamped to {@code [1, FollowingFeedService.MAX_LIMIT]}.
+     */
+    @GetMapping("/following")
+    @Operation(summary = "Get following activity feed",
+               description = "Returns POSITION_OPENED / POSITION_CLOSED events for users the viewer follows, with trader-performance metadata.")
+    public ResponseEntity<List<FollowingActivityEvent>> getFollowingActivity(
+            @RequestParam(defaultValue = "20") int limit) {
+        Long userId = authenticatedUser.currentUserId();
+        return ResponseEntity.ok(followingFeedService.getFollowingActivity(userId, limit));
     }
 }

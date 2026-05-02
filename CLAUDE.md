@@ -453,7 +453,16 @@ Soft-removal is already supported via `PostStatus.REMOVED` / `CommentStatus.REMO
 
 ### Internal Endpoints (Moderation)
 
-All `/api/internal/**` paths are `permitAll()` in SecurityConfig but gated by `InternalSecretFilter` (validates `X-Internal-Secret` header â€” timing-safe comparison against `finmates.internal.shared-secret`). No JWT required.
+All `/api/internal/**` paths are `permitAll()` in SecurityConfig but gated by `InternalSecretFilter` (validates `X-Internal-Secret` header — timing-safe comparison against `finmates.internal.shared-secret`). No JWT required.
+
+#### Inter-service auth: shared secret
+
+- The `X-Internal-Secret` header pattern protects every `/api/internal/**` endpoint in fm-social. Spring Security `permitAll`s those paths; `InternalSecretFilter` is the actual gate.
+- fm-social and every caller (today: fm-admin via `FmSocialClient`, finmates-main via internal clients) MUST be configured with the same `INTERNAL_SHARED_SECRET` in non-dev profiles.
+- **Dev profile** falls back to `dev-local-secret` on both sides — never deploy this value.
+- **k8s / prod profiles** fail fast at startup: `InternalSecretValidator` (`com.finmates.social.config`) throws `IllegalStateException` from `@PostConstruct` if `finmates.internal.shared-secret` is blank or equals `dev-local-secret` while the active profile is one of `k8s`, `prod`, `production`, `aws`. Spring Boot will refuse to start.
+- On every successful startup the validator logs `Internal shared secret configured (length=N, profile=X)` at INFO. The secret value is NEVER logged — only its length.
+- On a 401 from `InternalSecretFilter`, response body now includes `"hint":"X-Internal-Secret missing or mismatched"` and the filter logs a WARN with the request path + remote address (no secret values). When debugging 401s on `/api/internal/**`, check both services' startup logs for the `Internal shared secret configured (length=N)` line and confirm the lengths match.
 
 | Method | Path | Purpose |
 |--------|------|---------|

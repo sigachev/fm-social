@@ -19,9 +19,6 @@ FROM eclipse-temurin:21-jre-alpine
 
 WORKDIR /app
 
-# Non-root user for security
-RUN addgroup -S social && adduser -S social -G social
-USER social
 
 COPY --from=builder /build/target/*.jar app.jar
 

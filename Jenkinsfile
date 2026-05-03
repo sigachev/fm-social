@@ -5,7 +5,7 @@ pipeline {
         DEPLOYMENT_NAME = "social"
 
         DOCKER_IMAGE             = "fm-social"
-        K8S_NAMESPACE            = "k8s"
+        K8S_NAMESPACE            = "dev"
         KUBECONFIG_CREDENTIALS_ID = 'k8s-creds'
 
         NEXUS_CREDENTIALS_ID = "nexus-user-credentials"

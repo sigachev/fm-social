@@ -25,7 +25,6 @@ USER social
 
 COPY --from=builder /build/target/*.jar app.jar
 
-EXPOSE 8091
 
 ENV JAVA_OPTS=""
 

@@ -354,9 +354,18 @@ has no rows.
 | Method | Path | Response | Repo backing |
 |--------|------|----------|--------------|
 | GET | `/api/internal/follows/mates?userId=X` | `Set<Long>` | `findAllMateIds` (NEW) |
+| GET | `/api/internal/follows/mates?userId=X&include=profile` | `List<MateProfileEntry>` `{userId, username, displayName, avatarUrl}` | `findAllMateIds` + `ProfileService.getBatchSummaries` (Stage 12) |
 | GET | `/api/internal/follows/following?userId=X` | `Set<Long>` | `findAllFollowingIds` (NEW) |
 | GET | `/api/internal/follows/followers?userId=X` | `Set<Long>` | `findAllFollowerIds` (existing) |
 | GET | `/api/internal/follows/followers-summary?userId=X` | `{totalCount, recent: [{userId, createdAt}]}` (recent capped at 50) | `countByFollowedIdAndStatus` + `findRecentFollowers` (NEW) |
+
+**`?include=profile` variant** (Stage 12, May 2026): same auth + cache namespace
+(`mates:profile:` key prefix) but joins server-side with `ProfileService.getBatchSummaries`
+to avoid a second round-trip per mate. `username`, `displayName`, `avatarUrl` are
+nullable per the underlying `ProfileSummaryResponse` contract — callers fall back to
+initials. Routing uses Spring's `params={"!include"}` / `params="include=profile"`
+discriminator on identical paths so the no-param shape stays `Set<Long>` for
+back-compat with existing `FmSocialClient.getMateIds` callers.
 
 Cache: `internal-follows` Caffeine cache, 60s TTL, 10k max entries; per-endpoint
 key prefixes (`mates:` / `following:` / `followers:` / `summary:`) on a single shared

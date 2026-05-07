@@ -51,12 +51,13 @@ class FollowsInternalControllerTest {
     private static final String HEADER = "X-Internal-Secret";
 
     @Mock FollowRepository followRepository;
+    @Mock com.finmates.social.profile.ProfileService profileService;
 
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
-        FollowsInternalController controller = new FollowsInternalController(followRepository);
+        FollowsInternalController controller = new FollowsInternalController(followRepository, profileService);
         InternalSecretFilter filter = new InternalSecretFilter();
         ReflectionTestUtils.setField(filter, "internalSharedSecret", SECRET);
 

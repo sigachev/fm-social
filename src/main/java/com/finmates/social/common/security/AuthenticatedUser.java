@@ -43,4 +43,30 @@ public class AuthenticatedUser {
         }
         return Long.valueOf(userIdClaim.toString());
     }
+
+    /**
+     * Returns the authenticated viewer's user_id, or {@code null} if the request
+     * is anonymous (no JWT) or the JWT is missing the {@code user_id} claim.
+     *
+     * <p>Canonical pattern for <strong>auth-optional</strong> endpoints in fm-social.
+     * Prefer this helper over reaching for {@code @AuthenticationPrincipal(required = false)}
+     * or reading {@code SecurityContextHolder} inline — keeps the JWT extraction
+     * logic centralized and the behavior consistent with {@link #currentUserId()}.
+     *
+     * <p>Use case: a controller method whose URL is configured {@code permitAll()}
+     * in SecurityConfig, but which behaves differently based on whether a viewer
+     * is identified (e.g. {@code GET /api/posts/by-cashtag} defaults to network
+     * scope when authenticated and global scope when anonymous).
+     */
+    public Long currentUserIdOrNull() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (!(auth instanceof JwtAuthenticationToken jwtAuth)) {
+            return null;
+        }
+        Object userIdClaim = jwtAuth.getToken().getClaim("user_id");
+        if (userIdClaim == null) {
+            return null;
+        }
+        return Long.valueOf(userIdClaim.toString());
+    }
 }

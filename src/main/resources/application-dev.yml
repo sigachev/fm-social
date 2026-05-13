@@ -37,3 +37,13 @@ finmates:
   jwt:
     principal-attribute: preferred_username
     resource-id: finmates-app
+
+# SQL visibility for dev. Enables N+1 detection in PR verification workflows —
+# every controller PR that touches data access should be eyeballed against the
+# Hibernate SQL log before commit. BasicBinder at TRACE prints parameter values
+# so you can spot duplicate per-row queries with different bind args.
+# See CLAUDE.md → "SQL visibility in dev profile" for rationale.
+logging:
+  level:
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE

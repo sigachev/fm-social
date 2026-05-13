@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 
 public interface PostRepository extends JpaRepository<Post, Long> {
@@ -34,4 +35,51 @@ public interface PostRepository extends JpaRepository<Post, Long> {
     @Modifying
     @Query("UPDATE Post p SET p.reactionCount = p.reactionCount + :delta WHERE p.id = :id")
     void adjustReactionCount(@Param("id") Long id, @Param("delta") int delta);
+
+    // ── Cashtag search (native SQL — engagement-weighted sort) ──────────────
+    //
+    // No post_cashtags join table or tsvector index exists (cashtags live as
+    // plain text in posts.content). This is the agreed-upon scale-bounded
+    // mitigation; a post_cashtags migration is tracked as follow-up work in
+    // CLAUDE.md. The :pattern parameter is built by the service as a quoted
+    // form like '%$btc%' (lowercase) and matched against LOWER(content) for
+    // case-insensitive search anchored on the cashtag '$' prefix.
+    //
+    // Engagement-weighted sort: for posts created in the last 24h, score is
+    // (reaction_count + comment_count * 2). Older posts score 0 and fall
+    // through to createdAt DESC. JPQL CASE+INTERVAL is awkward across
+    // dialects — native PostgreSQL is the right call here and matches other
+    // native methods in this codebase (BlockRepository.existsBlockInEitherDirection).
+
+    @Query(value = """
+            SELECT * FROM posts
+            WHERE status = 'ACTIVE'
+              AND LOWER(content) LIKE :pattern
+            ORDER BY
+              CASE WHEN created_at >= NOW() - INTERVAL '24 hours'
+                   THEN (reaction_count + comment_count * 2)
+                   ELSE 0
+              END DESC,
+              created_at DESC
+            LIMIT :limit
+            """, nativeQuery = true)
+    List<Post> findByCashtagGlobal(@Param("pattern") String pattern,
+                                   @Param("limit") int limit);
+
+    @Query(value = """
+            SELECT * FROM posts
+            WHERE status = 'ACTIVE'
+              AND LOWER(content) LIKE :pattern
+              AND author_id IN (:authorIds)
+            ORDER BY
+              CASE WHEN created_at >= NOW() - INTERVAL '24 hours'
+                   THEN (reaction_count + comment_count * 2)
+                   ELSE 0
+              END DESC,
+              created_at DESC
+            LIMIT :limit
+            """, nativeQuery = true)
+    List<Post> findByCashtagNetwork(@Param("pattern") String pattern,
+                                    @Param("authorIds") Collection<Long> authorIds,
+                                    @Param("limit") int limit);
 }

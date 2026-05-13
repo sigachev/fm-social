@@ -113,6 +113,7 @@ OpenAPI JSON: `http://localhost:8091/v3/api-docs`
 | PATCH | `/api/posts/{id}` | Update post (5-min edit window) |
 | DELETE | `/api/posts/{id}` | Soft-delete post |
 | GET | `/api/posts/user/{userId}` | Get posts by user (paginated) |
+| GET | `/api/posts/by-cashtag` | **Mixed-auth.** Recent posts tagged with a cashtag (token-detail social column). See section below. |
 
 ### CommentController — `/api/comments`
 | Method | Path | Description |
@@ -184,6 +185,61 @@ Sibling endpoint to the existing `/api/feed`. Surfaces a chronologically-ordered
 **LAUNCH CAVEAT (2026-04-30)**: `crypto.user_wallet_snapshots` has only 7 days of accumulated history at deploy time (2026-04-23 to 2026-04-30, 4 distinct users). `return1d` works today; `return1w` works for users with ≥7 days; **`return1m` will be null for ALL users until 2026-05-23**. The em-dash render on the FE is correct — do not patch the backend or the FE to lie with zero. The data accumulates passively as the daily snapshot job continues to run.
 
 **Cache-mode for tests** (`src/test/resources/mockito-extensions/org.mockito.plugins.MockMaker`): set to `mock-maker-subclass` because Mockito's default inline mock-maker fails to instrument concrete services like `ProfileService` on Java 24 (the build target is Java 21 but local dev runs against JDK 24). Subclass-mode mocks work fine for everything fm-social tests do today; if you ever need to mock a `final` class or a static method, reconsider this setting.
+
+### Token-Detail Cashtag Feed — `GET /api/posts/by-cashtag` (added 2026-05-13)
+
+Companion to the token-detail social column on `/token/:symbol` in finmates-front. Powers the `<TokenFeedStrip symbol={...}/>` block. The frontend's `useTokenFeed(symbol)` consumes this contract.
+
+**Query params**:
+- `symbol` (required, String) — asset symbol, e.g. `BTC`. Normalized to uppercase server-side before matching.
+- `scope` (optional, String) — `network` | `global`. Default is **JWT-presence-derived**: authenticated viewers default to `network` (posts from followed authors); anonymous viewers default to `global` (platform-wide). Logic lives in `PostController.resolveScope`, NOT pushed to the frontend.
+- `limit` (optional, int) — clamped to `[1, 20]`, default 6.
+
+**Auth**: mixed.
+- Path is in `SecurityConfig.PUBLIC_PATHS` so `permitAll()` at the URL layer.
+- `@PreAuthorize("permitAll()")` on the method overrides the class-level `@PreAuthorize("isAuthenticated()")` on PostController.
+- Controller calls `AuthenticatedUser.currentUserIdOrNull()` (NOT `currentUserId()`) — the sibling helper added in this PR returns `null` instead of throwing when JWT is absent. **This is the canonical pattern for optional-auth endpoints in fm-social** — see javadoc on `currentUserIdOrNull` and prefer it over `@AuthenticationPrincipal(required = false)` or inline `SecurityContextHolder` access.
+- `scope=network` with no JWT → **401 Unauthorized** (explicit `ResponseStatusException(HttpStatus.UNAUTHORIZED, ...)` thrown by the controller — NOT a `ForbiddenActionException` which would map to 403). The 401 surfaces because the URL is permitAll at the filter chain, so we have to enforce auth manually for the network branch.
+
+**Cashtag matching strategy (State c — LIKE search)**:
+- No `post_cashtags` join table exists.
+- No tsvector full-text-search column on `posts`.
+- Implementation: `LOWER(content) LIKE '%$<symbol>%'` against the un-indexed `posts.content` column in `PostRepository.findByCashtagGlobal` / `findByCashtagNetwork` (native PostgreSQL queries).
+- The leading `$` anchors the match to cashtag-prefixed occurrences and prevents accidental substring hits (e.g. won't match `BTCUSD` in body text).
+- **This is the agreed-upon scale-bounded mitigation.** It is OK for current scale (posts ≪ 50k rows). **A `post_cashtags` join table or a tsvector index should be added as follow-up work when the posts table grows past ~50k rows.** Track as a future migration; the LIKE plan is a sequential scan and will degrade.
+
+**Sort**: engagement-weighted within last 24h, falling back to `createdAt` desc for older posts.
+```sql
+ORDER BY
+  CASE WHEN created_at >= NOW() - INTERVAL '24 hours'
+       THEN (reaction_count + comment_count * 2)
+       ELSE 0
+  END DESC,
+  created_at DESC
+```
+JPQL doesn't express this cleanly across dialects, so the queries are native SQL — matching the existing `BlockRepository.existsBlockInEitherDirection` native-SQL precedent.
+
+**Block filtering — scope-asymmetric by design**:
+- `scope=network`: `BlockRepository.existsBlockInEitherDirection(viewerId, authorId)` is called per post in `PostService.filterBlocksAndMap`. Same bounded-N+1 pattern as `FeedService` for the main feed. Result size may be less than `limit` after filtering — over-fetch-to-compensate is intentionally NOT implemented; if it becomes a real UX problem, address then.
+- `scope=global`: **no block filter applied.** Deliberate design trade-off:
+  - Global is anonymous-friendly (no viewer to block from when there is no JWT).
+  - Global is cacheable per `(symbol, limit)` — applying a per-viewer block filter would defeat the cache (every viewer needs a different filtered slice).
+  - The trade-off is that an authenticated viewer hitting `scope=global` will see posts from authors they may have blocked. Acceptable for "trending across platform" — if they don't want that, they should hit `scope=network`.
+  - **Do not "fix" this by applying the block filter to global.** It would silently turn a shared cache into a per-viewer cache, and would block the public/anonymous use case entirely.
+
+**Caching — `scope=global` only**:
+- Direct `RedisTemplate<String, String>` write (existing pattern in fm-social; no `@Cacheable` + RedisCacheManager bridge introduced).
+- Key: `posts:by-cashtag:global:{NORMALIZED_SYMBOL}:{limit}`.
+- Value: JSON-serialized `List<PostResponse>` via the default Spring Boot `ObjectMapper` bean.
+- TTL: **2 minutes**. New posts surface after at most 2 minutes — no best-effort invalidation on `PostService.createPost` (the cost of cashtag-parsing every post to invalidate matching keys is not justified by a 2-minute staleness window).
+- Cache read/write are best-effort: Redis outage logs a WARN and falls through to the DB path. Verification: in a Redis-down scenario the SQL log would show DB hits on every call AND a `Cashtag cache read failed for key=...` WARN line.
+- `scope=network` is **NOT cached** — per-viewer, follow-graph-dependent, cache would be per-viewer-per-symbol-per-limit and amortize poorly.
+
+**N+1 profile (DTO construction)**: same as main feed.
+- 15 of 19 `PostResponse` fields come directly from `posts` row (denormalized `commentCount`/`reactionCount` included — populated by write-time adjusters in `CommentService`/`ReactionService`).
+- `authorDisplayName` / `authorAvatarUrl` resolve through `PostService.authorCache` (Caffeine, 30s TTL, max 1000). Cold-cache worst case: ≤ `limit` profile lookups, single-row PK probes.
+- `mediaUrls` and avatar URL: per-row `S3Service.createPresignedGet()` — local HMAC, no network or DB.
+- No follow / visibility / ACL per-row service calls in `toResponse`.
 
 ### FollowController — `/api/follows`
 | Method | Path | Description |
@@ -490,6 +546,16 @@ All `/api/internal/**` paths are `permitAll()` in SecurityConfig but gated by `I
 - PERMANENT ban or active SUSPENSION â†’ HTTP 403 "Your account has been suspended or banned"
 - Network errors â†’ fail-open (check skipped, write proceeds) to prevent ban-service outages blocking all social activity
 - Invalidate cache: `userBanCheckService.invalidate(userId)` after an unban
+## SQL visibility in dev profile
+
+`application-dev.yml` sets `org.hibernate.SQL: DEBUG` and `org.hibernate.type.descriptor.sql.BasicBinder: TRACE`. This is **on by default in dev** and is intentional, not a temporary diagnostic toggle.
+
+**Why**: every controller PR that touches data access must be eyeballed against the Hibernate SQL log before commit. N+1 patterns (per-row queries against profiles, blocks, follows, etc.) are not visible in unit tests or static review — they only surface as repeated SELECTs with different bind args in the SQL log. PR verification workflows for endpoints like `GET /api/feed`, `GET /api/posts/by-cashtag`, etc. depend on this.
+
+**What "bounded N+1" means here**: a per-row query whose count is capped by the request's `limit` parameter (≤ 20-50) and whose individual cost is a sub-millisecond indexed PK lookup. Bounded N+1 against `profiles` (author cache cold-miss) and `blocks` (`existsBlockInEitherDirection` per post) is the accepted pattern in this service — it mirrors the main feed and is amortized by Caffeine. **What to watch for instead**: unbounded outer-correlated queries, COUNT subqueries firing per row, or fan-out queries against tables that should have been part of the initial batch SELECT.
+
+If you ever want to silence the SQL log temporarily during a long-running dev session (e.g. profiling a hot path), override locally via `JAVA_TOOL_OPTIONS=-Dlogging.level.org.hibernate.SQL=INFO` — do NOT commit a change to `application-dev.yml` that downgrades the level.
+
 ## Known Gotchas
 
 | Issue | Pattern |

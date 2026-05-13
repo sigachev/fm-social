@@ -38,7 +38,13 @@ public class SecurityConfig {
             "/swagger-ui/**",
             "/swagger-ui.html",
             "/api/profiles/*/public",
-            "/api/internal/**"
+            "/api/internal/**",
+            // Mixed-auth endpoint: anonymous viewers get scope=global, authenticated
+            // viewers get scope=network. Method-level @PreAuthorize("permitAll()")
+            // on PostController.getPostsByCashtag overrides the class-level
+            // @PreAuthorize("isAuthenticated()"); the controller enforces auth
+            // internally for scope=network via AuthenticatedUser.currentUserIdOrNull().
+            "/api/posts/by-cashtag"
     };
 
     @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri}")

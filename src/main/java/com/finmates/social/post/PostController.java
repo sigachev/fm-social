@@ -15,6 +15,9 @@ import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/posts")
@@ -77,6 +80,62 @@ public class PostController {
     public void deletePost(@PathVariable Long id) {
         Long userId = authenticatedUser.currentUserId();
         postService.deletePost(id, userId);
+    }
+
+    /**
+     * Recent posts tagged with an asset cashtag (e.g. $BTC), for the token-detail
+     * social column. Mixed-auth endpoint: anonymous viewers get {@code scope=global}
+     * by default; authenticated viewers get {@code scope=network} by default.
+     * {@code permitAll()} overrides the class-level {@code isAuthenticated()};
+     * scope=network with no JWT yields 401 from the inline check below.
+     */
+    @GetMapping("/by-cashtag")
+    @PreAuthorize("permitAll()")
+    @Operation(summary = "Recent posts tagged with a cashtag (network or global scope)")
+    @ApiResponse(responseCode = "200", description = "Posts matching the cashtag")
+    @ApiResponse(responseCode = "400", description = "Missing or invalid params")
+    @ApiResponse(responseCode = "401", description = "scope=network requires authentication")
+    public List<PostResponse> getPostsByCashtag(
+            @RequestParam String symbol,
+            @RequestParam(required = false) String scope,
+            @RequestParam(defaultValue = "6") int limit) {
+
+        if (symbol == null || symbol.trim().isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "symbol is required");
+        }
+        // Clamp to [1, 20]. 20 matches the documented max in CLAUDE.md / contract.
+        int effectiveLimit = Math.max(1, Math.min(20, limit));
+
+        Long viewerId = authenticatedUser.currentUserIdOrNull();
+
+        // Default-scope inference happens HERE in the controller (not on the
+        // frontend) so the contract is consistent regardless of caller. Auth
+        // present → network; absent → global.
+        PostService.CashtagScope effectiveScope = resolveScope(scope, viewerId);
+        if (effectiveScope == PostService.CashtagScope.NETWORK && viewerId == null) {
+            // Explicit 401 (not 403) per Phase 1 verification contract.
+            // The endpoint is permitAll() at the URL layer to allow anonymous
+            // scope=global, so the filter chain doesn't auto-401 — we surface
+            // the auth requirement here for the network branch only.
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
+                    "scope=network requires authentication");
+        }
+
+        return postService.getPostsByCashtag(symbol, effectiveScope, viewerId, effectiveLimit);
+    }
+
+    private PostService.CashtagScope resolveScope(String scopeParam, Long viewerId) {
+        if (scopeParam == null || scopeParam.isBlank()) {
+            return viewerId != null
+                    ? PostService.CashtagScope.NETWORK
+                    : PostService.CashtagScope.GLOBAL;
+        }
+        return switch (scopeParam.trim().toLowerCase()) {
+            case "network" -> PostService.CashtagScope.NETWORK;
+            case "global"  -> PostService.CashtagScope.GLOBAL;
+            default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "scope must be 'network' or 'global'");
+        };
     }
 
     @GetMapping("/user/{userId}")

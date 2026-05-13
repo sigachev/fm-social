@@ -1,5 +1,8 @@
 package com.finmates.social.post;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.finmates.social.block.BlockRepository;
 import com.finmates.social.common.PageResponse;
 import com.finmates.social.common.exception.EditWindowExpiredException;
 import com.finmates.social.common.exception.ForbiddenActionException;
@@ -8,6 +11,7 @@ import com.finmates.social.edit.PostEdit;
 import com.finmates.social.edit.PostEditRepository;
 import com.finmates.social.feed.FeedResponse;
 import com.finmates.social.feed.FeedService;
+import com.finmates.social.follow.FollowRepository;
 import com.finmates.social.post.dto.PostCreateRequest;
 import com.finmates.social.post.dto.PostResponse;
 import com.finmates.social.post.dto.PostUpdateRequest;
@@ -19,14 +23,17 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 @Slf4j
@@ -39,6 +46,10 @@ public class PostService {
     private final S3Service s3Service;
     private final FeedService feedService;
     private final ProfileRepository profileRepository;
+    private final FollowRepository followRepository;
+    private final BlockRepository blockRepository;
+    private final RedisTemplate<String, String> redisTemplate;
+    private final ObjectMapper objectMapper;
 
     /** Short-lived cache: avoids a profile DB hit per post during feed / profile renders. */
     private final Cache<Long, AuthorInfo> authorCache = Caffeine.newBuilder()
@@ -55,12 +66,20 @@ public class PostService {
                        PostEditRepository postEditRepository,
                        S3Service s3Service,
                        FeedService feedService,
-                       ProfileRepository profileRepository) {
+                       ProfileRepository profileRepository,
+                       FollowRepository followRepository,
+                       BlockRepository blockRepository,
+                       RedisTemplate<String, String> redisTemplate,
+                       ObjectMapper objectMapper) {
         this.postRepository = postRepository;
         this.postEditRepository = postEditRepository;
         this.s3Service = s3Service;
         this.feedService = feedService;
         this.profileRepository = profileRepository;
+        this.followRepository = followRepository;
+        this.blockRepository = blockRepository;
+        this.redisTemplate = redisTemplate;
+        this.objectMapper = objectMapper;
     }
 
     @Transactional
@@ -287,5 +306,121 @@ public class PostService {
                 post.getRemovalReason(),
                 post.getRemovedBy()
         );
+    }
+
+    // ── Cashtag feed (Phase 1 — token-detail social column) ─────────────────
+
+    /** Scope discriminator for {@link #getPostsByCashtag}. */
+    public enum CashtagScope { NETWORK, GLOBAL }
+
+    /**
+     * Redis key prefix for the {@code scope=GLOBAL} cache. TTL 2 minutes via
+     * {@link #setIfAbsent} below. NETWORK scope is per-viewer and not cached.
+     *
+     * <p>Cache TTL 2min. New posts surface after at most 2 minutes. No best-effort
+     * invalidation on write — the cost of cashtag-parsing every PostService.createPost
+     * to invalidate matching keys is not justified by a 2-minute staleness window.
+     */
+    private static final String CASHTAG_CACHE_KEY_PREFIX = "posts:by-cashtag:global:";
+    private static final Duration CASHTAG_CACHE_TTL = Duration.ofMinutes(2);
+
+    /**
+     * Recent posts tagged with a cashtag for the token-detail feed widget.
+     *
+     * <p>Scope:
+     * <ul>
+     *   <li>{@code NETWORK}: posts authored by users the viewer follows.
+     *       Caller must pass non-null {@code viewerId}; controller enforces auth.</li>
+     *   <li>{@code GLOBAL}: trending platform-wide. {@code viewerId} ignored
+     *       (no block filter applied — there is no viewer context to block from).
+     *       Response cached in Redis per (symbol, limit) for 2 minutes.</li>
+     * </ul>
+     *
+     * <p>Cashtag matching uses {@code LOWER(content) LIKE '%$<symbol>%'} against
+     * the un-indexed {@code posts.content} column. A {@code post_cashtags} join
+     * table or tsvector index is tracked as follow-up work in CLAUDE.md — this
+     * implementation is the agreed-upon scale-bounded mitigation.
+     *
+     * @param symbol asset symbol (e.g. "BTC"); normalized to uppercase
+     * @param scope  NETWORK or GLOBAL
+     * @param viewerId viewer user_id (required for NETWORK, ignored for GLOBAL)
+     * @param limit  result cap; controller clamps to [1, 20]
+     */
+    public List<PostResponse> getPostsByCashtag(String symbol,
+                                                CashtagScope scope,
+                                                Long viewerId,
+                                                int limit) {
+        final String normalized = symbol.trim().toUpperCase();
+        // Pattern is lowercased once here so the SQL LOWER(content) comparison
+        // collates correctly. The leading '$' anchors to the cashtag prefix
+        // and rejects accidental substring matches (e.g. won't match "BTCUSD"
+        // in body text — only "$BTC" or "$btc" etc.).
+        final String pattern = "%$" + normalized.toLowerCase() + "%";
+
+        if (scope == CashtagScope.GLOBAL) {
+            return getGlobalCashtagPostsCached(normalized, pattern, limit);
+        }
+
+        // NETWORK scope: viewerId is guaranteed non-null by the controller.
+        Set<Long> followingIds = followRepository.findAllFollowingIds(viewerId);
+        if (followingIds.isEmpty()) {
+            return List.of();
+        }
+
+        List<Post> rows = postRepository.findByCashtagNetwork(pattern, followingIds, limit);
+        return filterBlocksAndMap(rows, viewerId);
+    }
+
+    /**
+     * Global-scope path with Redis read-through cache. Cache misses serialize
+     * the response list as JSON and write back with the 2-min TTL.
+     */
+    private List<PostResponse> getGlobalCashtagPostsCached(String normalizedSymbol,
+                                                           String pattern,
+                                                           int limit) {
+        final String cacheKey = CASHTAG_CACHE_KEY_PREFIX + normalizedSymbol + ":" + limit;
+
+        // Cache read — best-effort. Redis outage falls through to the DB path.
+        try {
+            String cached = redisTemplate.opsForValue().get(cacheKey);
+            if (cached != null) {
+                return objectMapper.readValue(cached, new TypeReference<List<PostResponse>>() {});
+            }
+        } catch (Exception e) {
+            log.warn("Cashtag cache read failed for key={}, falling through to DB: {}",
+                    cacheKey, e.getMessage());
+        }
+
+        List<Post> rows = postRepository.findByCashtagGlobal(pattern, limit);
+        // No viewerId on global scope → no block filter possible.
+        List<PostResponse> responses = rows.stream().map(this::toResponse).toList();
+
+        // Cache write — best-effort. Failure is non-fatal (next request rebuilds).
+        try {
+            String json = objectMapper.writeValueAsString(responses);
+            redisTemplate.opsForValue().set(cacheKey, json, CASHTAG_CACHE_TTL);
+        } catch (Exception e) {
+            log.warn("Cashtag cache write failed for key={}: {}", cacheKey, e.getMessage());
+        }
+
+        return responses;
+    }
+
+    /**
+     * Mirrors {@code FeedService}'s post-fetch block filter: drops any post
+     * authored by a user who has a {@code blocks} row in either direction with
+     * the viewer. Result size may be less than {@code limit} after filtering —
+     * over-fetch-to-compensate is intentionally NOT implemented (see Prompt B
+     * Flag 3 decision).
+     */
+    private List<PostResponse> filterBlocksAndMap(List<Post> rows, Long viewerId) {
+        List<PostResponse> out = new ArrayList<>(rows.size());
+        for (Post p : rows) {
+            if (blockRepository.existsBlockInEitherDirection(viewerId, p.getAuthorId())) {
+                continue;
+            }
+            out.add(toResponse(p));
+        }
+        return out;
     }
 }

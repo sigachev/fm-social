@@ -212,6 +212,53 @@ class CommentRepositoryMentionsTest {
         assertThat(rows.get(1).getContent()).isEqualTo("n1 $ETH");
     }
 
+    // ── countActiveByAssetSymbol (Discussion-panel comments tab) ─────────────
+    //
+    // Predicate matches findActiveByAssetSymbol exactly (no parent_id filter)
+    // so the count equals the list endpoint's Page.totalElements — the tab
+    // label and the visible items must agree.
+
+    @Test
+    @DisplayName("countActiveByAssetSymbol counts only ACTIVE rows on the asset")
+    void countActive_filtersByStatus() {
+        seedAssetCommentWithStatus("a", "active $foo", ETH, List.of(), CommentStatus.ACTIVE);
+        seedAssetCommentWithStatus("a", "hidden",      ETH, List.of(), CommentStatus.HIDDEN);
+        seedAssetCommentWithStatus("a", "removed",     ETH, List.of(), CommentStatus.REMOVED);
+        seedAssetCommentWithStatus("a", "review",      ETH, List.of(), CommentStatus.UNDER_REVIEW);
+        seedAssetCommentWithStatus("a", "active too",  ETH, List.of(), CommentStatus.ACTIVE);
+
+        assertThat(commentRepository.countActiveByAssetSymbol(ETH)).isEqualTo(2L);
+    }
+
+    @Test
+    @DisplayName("countActiveByAssetSymbol INCLUDES replies (flat list semantics)")
+    void countActive_includesReplies() {
+        // seedReply() hardcodes target_symbol=BTC (matches parent's symbol
+        // in this fixture pattern across all the Mentions tests), so the
+        // includes-replies assertion has to use BTC end-to-end to keep all
+        // three rows on the same target.
+        Comment top = seedAssetComment("a", "top thread", BTC, List.of());
+        seedReply(top.getId(), "b", "reply 1", List.of());
+        seedReply(top.getId(), "c", "reply 2", List.of());
+
+        // 1 top-level + 2 replies = 3. Counts the flat volume to match the
+        // list endpoint, which returns top-level and replies as siblings.
+        // FE groups by parentId client-side for nested display.
+        assertThat(commentRepository.countActiveByAssetSymbol(BTC)).isEqualTo(3L);
+    }
+
+    @Test
+    @DisplayName("countActiveByAssetSymbol filters by symbol exactly")
+    void countActive_filtersBySymbol() {
+        seedAssetComment("a", "on eth", ETH, List.of());
+        seedAssetComment("a", "on eth", ETH, List.of());
+        seedAssetComment("a", "on btc", BTC, List.of());
+
+        assertThat(commentRepository.countActiveByAssetSymbol(ETH)).isEqualTo(2L);
+        assertThat(commentRepository.countActiveByAssetSymbol(BTC)).isEqualTo(1L);
+        assertThat(commentRepository.countActiveByAssetSymbol("SOL")).isZero();
+    }
+
     // ── index usage ──────────────────────────────────────────────────────────
 
     @Test

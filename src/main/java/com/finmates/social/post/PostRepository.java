@@ -82,4 +82,33 @@ public interface PostRepository extends JpaRepository<Post, Long> {
     List<Post> findByCashtagNetwork(@Param("pattern") String pattern,
                                     @Param("authorIds") Collection<Long> authorIds,
                                     @Param("limit") int limit);
+
+    // ── Cashtag count variants (for Discussion-panel counts endpoint) ──────
+    //
+    // Predicates mirror findByCashtagGlobal / findByCashtagNetwork above
+    // (minus ORDER BY and LIMIT — counts don't care about ranking). Service
+    // passes the same pre-built `'%$btc%'` pattern as the list calls so
+    // case-insensitive cashtag-prefix anchoring stays consistent.
+    //
+    // Performance note: these queries inherit the same scale ceiling as the
+    // list endpoint — full seq scan on posts.content with LOWER(...) LIKE
+    // until the planned post_cashtags join table lands (tracked as follow-up
+    // in CLAUDE.md). Acceptable at current scale; revisit when post volume
+    // grows or counts traffic spikes (every token-page mount fires this).
+
+    @Query(value = """
+            SELECT COUNT(*) FROM posts
+            WHERE status = 'ACTIVE'
+              AND LOWER(content) LIKE :pattern
+            """, nativeQuery = true)
+    long countByCashtagGlobal(@Param("pattern") String pattern);
+
+    @Query(value = """
+            SELECT COUNT(*) FROM posts
+            WHERE status = 'ACTIVE'
+              AND LOWER(content) LIKE :pattern
+              AND author_id IN (:authorIds)
+            """, nativeQuery = true)
+    long countByCashtagAndAuthors(@Param("pattern") String pattern,
+                                  @Param("authorIds") Collection<Long> authorIds);
 }

@@ -96,4 +96,35 @@ public interface CommentRepository extends JpaRepository<Comment, Long> {
           AND NOT (c.target_type = 'ASSET' AND c.target_symbol = :currentSymbol)
         """, nativeQuery = true)
     long countMentionsForSymbol(@Param("currentSymbol") String currentSymbol);
+
+    /**
+     * Discussion-panel counts: total ACTIVE comments on the given asset's
+     * page (top-level threads + nested replies, flat). Mirrors the
+     * "Comments" tab on the token detail page.
+     *
+     * <p><b>Predicate matches {@link #findActiveByAssetSymbol} exactly</b>
+     * — no {@code parent_id IS NULL} filter. The existing list endpoint
+     * returns a flat page (top-level + replies as siblings) and the FE
+     * groups by {@code parentId} client-side for nested rendering. If the
+     * count filtered to threads only, "Comments (5)" in the tab label would
+     * disagree with the 12 items the user actually sees in the list. This
+     * count and the list endpoint's {@code Page.totalElements} must stay
+     * aligned.</p>
+     *
+     * <p>This is a deliberate asymmetry against
+     * {@link #countMentionsForSymbol} — Mentions counts top-level only
+     * (it's a feed of threads, not individual messages). Same table,
+     * different UI semantics on different surfaces. Both choices are
+     * intentional and match what the user reads next to each tab label.</p>
+     *
+     * <p>Predicate is JPQL — served by {@code idx_comments_target_asset}
+     * (V2 partial index, status=ACTIVE branch).</p>
+     */
+    @Query("""
+        SELECT COUNT(c) FROM Comment c
+        WHERE c.targetType = 'ASSET'
+          AND c.targetSymbol = :symbol
+          AND c.status = 'ACTIVE'
+        """)
+    long countActiveByAssetSymbol(@Param("symbol") String symbol);
 }

@@ -275,6 +275,7 @@ entry. The existing `/api/posts/by-cashtag` is the precedent.
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | GET | `/api/discussion/token/{symbol}/mentions` | permitAll | Mentions tab — top-level ACTIVE comments cashtagging `{symbol}` from surfaces OTHER than `{symbol}`'s own asset page. Pagination: `page` + `size` (default 0/20, max size 100). Returns `PageResponse<MentionResponse>`. |
+| GET | `/api/discussion/token/{symbol}/counts` | permitAll | Aggregate counts for all five Discussion-panel tabs in a single round-trip at panel mount. Returns `DiscussionCounts` with five `Long` fields: `yourNetwork`, `platform`, `comments`, `mentions`, `news`. Mixed-auth — `yourNetwork` is `0` for anonymous viewers (no 401) and for authed viewers with empty follow lists. `news` is always `null` in v1 (see below). |
 
 **Scope decisions (Phase 2):**
 - **ASSET + POST targets only.** PORTFOLIO comments are indexed (V17 extraction
@@ -305,6 +306,25 @@ the page envelope. Per-mention reply counts are computed correlated rather
 than denormalised; that decision is deferred indefinitely (`reply_count`
 column on `comments` would require trigger or service-layer mutation on
 every reply create / soft-delete / restore + a backfill).
+
+**Counts endpoint (Phase 3.0 — 2026-05-15).** `GET /api/discussion/token/{symbol}/counts` returns a single `DiscussionCounts` record with the five tab counts in one round-trip:
+
+```java
+public record DiscussionCounts(
+    Long yourNetwork, Long platform, Long comments, Long mentions, Long news
+) {}
+```
+
+- **`yourNetwork`** — posts cashtagging the symbol authored by users the viewer follows. `0` for anonymous viewers (the controller calls `AuthenticatedUser.currentUserIdOrNull()` and the service handles `null` cleanly — no 401). `0` also for authenticated viewers with an empty follow list, via short-circuit that mirrors `PostService.getPostsByCashtag`'s NETWORK-scope handling. Backed by `PostRepository.countByCashtagAndAuthors(pattern, followingIds)`.
+- **`platform`** — all posts cashtagging the symbol, regardless of follow graph. Backed by `PostRepository.countByCashtagGlobal(pattern)`. The cashtag pattern is the same `'%$btc%'` form built by `PostService` so case-insensitive cashtag-prefix anchoring stays consistent across list and counts paths.
+- **`comments`** — **total** ACTIVE comments on the asset's own page (top-level + replies, flat). Backed by `CommentRepository.countActiveByAssetSymbol(symbol)`. Predicate matches `findActiveByAssetSymbol` exactly — no `parent_id IS NULL` filter — so the tab label and the list contents always agree on the same number. The list endpoint returns flat (top-level + replies as siblings) and the FE groups by `parentId` client-side for nested display; filtering the count to threads would surface "Comments (5)" next to a list of 12 items, which is exactly the user-facing bug we're avoiding.
+
+  **Deliberate asymmetry with `mentions`:** Mentions counts top-level only (it's a feed of threads, each one a clickable entry). The Comments tab is a flat scroll, so its count is the flat volume. Same table, two different UI surfaces, two different count semantics — both match what the user reads next to the label.
+- **`mentions`** — reuses Phase 2's `CommentRepository.countMentionsForSymbol(symbol)`. Same scope decisions: ASSET+POST surfaces only, PORTFOLIO indexed but not surfaced.
+- **`news`** — **always `null` in v1.** News data lives on fm-crypto-data (`news_article` table; `GET /api/news/asset/{symbol}` exposes a list with `limit` cap of 50 but no count endpoint). Rather than wire a new cross-service dependency for a UX nicety, the FE branches on `news == null` and omits the count from the News tab label. Building a per-asset news-count endpoint on fm-crypto-data + a client call from fm-social is tracked as a follow-up under **Deferred Features**.
+
+All five count queries run sequentially on the request thread. At current data volume each query is sub-millisecond except `countByCashtagGlobal` / `countByCashtagAndAuthors`, which inherit the seq-scan ceiling of `LOWER(content) LIKE '%$btc%'` until the planned `post_cashtags` join table lands — tracked under **Deferred Features**. Parallelisation via `CompletableFuture.allOf(...)` is a v1.1 concern.
+
 
 ## JWT `user_id` Claim Dependency
 
@@ -426,6 +446,9 @@ The secret is shared across services — fm-messaging and fm-notifications will 
 | Mentions: block-list filtering | post-launch | **TODO** — Mentions doesn't filter out comments from users the viewer has blocked. Aligned with `/api/posts/by-cashtag`'s current behaviour. Address holistically when Discussion-panel block filtering ships across all tabs. |
 | Upgrade prod Postgres from 17 beta 3 to a stable 17.x | hygiene | **TODO** — `finmates.com:5432` runs `17beta3 (Debian 17~beta3-1.pgdg120+1)`. Affects all FinMates services on the shared instance. No known immediate issues; this is hygiene. Testcontainers test profile uses stable `postgres:17` to avoid relying on beta tags from Docker Hub. |
 | Mentions: nginx ingress rate-limit pattern | ops follow-up | **TODO** — verify the existing nginx ingress rate-limit covers `/api/discussion/*` (mixed-auth permitAll surface). If no pattern exists for unauthenticated reads beyond `/api/posts/by-cashtag`, add one. Not a blocker for v1. |
+| Counts: per-asset news count | post-launch | **TODO** — `DiscussionCounts.news` is hardcoded to `null` in v1. The FE omits the count from the News tab label when null. To populate: add `GET /api/news/asset/{symbol}/count` (or similar) on fm-crypto-data + a client call from fm-social. Adds a cross-service dependency; defer until the missing count is a real UX complaint. |
+| Counts/Posts cashtag: post_cashtags join table | post-launch | **TODO** — `LOWER(content) LIKE '%$btc%'` predicate on `posts.content` is a full seq scan; current scale (~tens of posts) makes it sub-ms but it's the dominant cost in both `/api/posts/by-cashtag` (list) and `/api/discussion/token/{symbol}/counts` (the `platform` + `yourNetwork` count fields). The Discussion-panel counts endpoint fires on every token-page mount, amplifying the scale-ceiling concern. Migration to a `post_cashtags(post_id, symbol)` join table with a B-tree on `(symbol, post_id)` is the planned mitigation. |
+| Counts: parallel query execution | v1.1 | **TODO** — `DiscussionService.getCountsForSymbol` runs all five counts sequentially on the request thread. At current scale total request latency is well under 100ms. `CompletableFuture.allOf(...)` with a dedicated executor could shave 10–20ms in the best case, with the usual cost of async-context lifecycle complexity (error handling, security context propagation, tx boundaries). Revisit if real load shows it matters. |
 
 ## Service Dependencies
 

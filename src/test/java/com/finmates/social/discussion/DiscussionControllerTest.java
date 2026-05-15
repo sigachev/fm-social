@@ -64,6 +64,12 @@ class DiscussionControllerTest {
     @Autowired ObjectMapper objectMapper;
     @MockBean DiscussionService discussionService;
 
+    // DiscussionController constructor takes AuthenticatedUser as a real
+    // dependency (used to resolve the JWT viewer for /counts). Mocking lets
+    // tests pretend to be anon (returns null) or authed (returns Long) at
+    // the seam without wiring real JWT decoding.
+    @MockBean com.finmates.social.common.security.AuthenticatedUser authenticatedUser;
+
     // @WebMvcTest picks up @Component-annotated Filter classes (ProfileEnsureFilter,
     // InternalSecretFilter) and their @Configuration container (SecurityConfig).
     // None of them run with addFilters=false, but the beans still have to construct,
@@ -154,6 +160,87 @@ class DiscussionControllerTest {
         // smoke test, not by this @WebMvcTest slice.
         var method = DiscussionController.class.getMethod(
                 "getTokenMentions", String.class, int.class, int.class);
+        var preAuthorize = method.getAnnotation(
+                org.springframework.security.access.prepost.PreAuthorize.class);
+        assertThat(preAuthorize).isNotNull();
+        assertThat(preAuthorize.value()).isEqualTo("permitAll()");
+    }
+
+    // ── /counts endpoint ──────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("/counts returns 200 with the DiscussionCounts shape")
+    void getTokenCounts_returns200WithCountsShape() throws Exception {
+        when(authenticatedUser.currentUserIdOrNull()).thenReturn(null);
+        when(discussionService.getCountsForSymbol(anyString(), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new DiscussionCounts(0L, 12L, 1L, 2L, null));
+
+        mockMvc.perform(get("/api/discussion/token/ETH/counts"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.yourNetwork").value(0))
+                .andExpect(jsonPath("$.platform").value(12))
+                .andExpect(jsonPath("$.comments").value(1))
+                .andExpect(jsonPath("$.mentions").value(2));
+    }
+
+    @Test
+    @DisplayName("/counts with no JWT → service gets null viewerUserId, yourNetwork is 0")
+    void getTokenCounts_anonReturns200WithYourNetworkZero() throws Exception {
+        when(authenticatedUser.currentUserIdOrNull()).thenReturn(null);
+        when(discussionService.getCountsForSymbol(anyString(), org.mockito.ArgumentMatchers.isNull()))
+                .thenReturn(new DiscussionCounts(0L, 5L, 0L, 2L, null));
+
+        mockMvc.perform(get("/api/discussion/token/ETH/counts"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.yourNetwork").value(0));
+
+        // The controller MUST pass the null forward — anonymous handling
+        // lives in the service.
+        verify(discussionService).getCountsForSymbol(eq("ETH"), org.mockito.ArgumentMatchers.isNull());
+    }
+
+    @Test
+    @DisplayName("/counts with authed viewer → service gets Long viewerUserId")
+    void getTokenCounts_authReturns200WithYourNetworkComputed() throws Exception {
+        when(authenticatedUser.currentUserIdOrNull()).thenReturn(42L);
+        when(discussionService.getCountsForSymbol(anyString(), eq(42L)))
+                .thenReturn(new DiscussionCounts(3L, 12L, 1L, 2L, null));
+
+        mockMvc.perform(get("/api/discussion/token/ETH/counts"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.yourNetwork").value(3));
+
+        verify(discussionService).getCountsForSymbol(eq("ETH"), eq(42L));
+    }
+
+    @Test
+    @DisplayName("/counts response JSON contains all five fields including news=null")
+    void getTokenCounts_responseShapeMatchesDto() throws Exception {
+        when(authenticatedUser.currentUserIdOrNull()).thenReturn(null);
+        when(discussionService.getCountsForSymbol(anyString(), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new DiscussionCounts(0L, 12L, 1L, 2L, null));
+
+        // Jackson default: null values are still serialised as JSON `null`,
+        // so `news` field is present in the body with value null. FE checks
+        // for null and omits the count rendering. If a future change drops
+        // null fields (via `@JsonInclude(NON_NULL)`), `news.exists()` flips
+        // false and this test catches it.
+        mockMvc.perform(get("/api/discussion/token/ETH/counts"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.yourNetwork").exists())
+                .andExpect(jsonPath("$.platform").exists())
+                .andExpect(jsonPath("$.comments").exists())
+                .andExpect(jsonPath("$.mentions").exists())
+                // `news` is present in the body but JSON-null. Jackson default
+                // serialises null Long fields as `"news": null` rather than
+                // omitting them; FE branches on this.
+                .andExpect(jsonPath("$.news").value(org.hamcrest.Matchers.nullValue()));
+    }
+
+    @Test
+    @DisplayName("/counts @PreAuthorize(\"permitAll()\") is present on the handler")
+    void getTokenCounts_permitAllAnnotationPresent() throws NoSuchMethodException {
+        var method = DiscussionController.class.getMethod("getTokenCounts", String.class);
         var preAuthorize = method.getAnnotation(
                 org.springframework.security.access.prepost.PreAuthorize.class);
         assertThat(preAuthorize).isNotNull();

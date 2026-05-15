@@ -1,6 +1,7 @@
 package com.finmates.social.discussion;
 
 import com.finmates.social.common.PageResponse;
+import com.finmates.social.common.security.AuthenticatedUser;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -27,9 +28,12 @@ import org.springframework.web.bind.annotation.RestController;
 public class DiscussionController {
 
     private final DiscussionService discussionService;
+    private final AuthenticatedUser authenticatedUser;
 
-    public DiscussionController(DiscussionService discussionService) {
+    public DiscussionController(DiscussionService discussionService,
+                                AuthenticatedUser authenticatedUser) {
         this.discussionService = discussionService;
+        this.authenticatedUser = authenticatedUser;
     }
 
     /**
@@ -52,5 +56,27 @@ public class DiscussionController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         return discussionService.getMentionsForSymbol(symbol, page, size);
+    }
+
+    /**
+     * Aggregate counts for the five Discussion-panel tabs. Single round-trip
+     * for the FE to populate tab labels on panel mount. Mixed-auth — anon
+     * viewers get {@code yourNetwork: 0} cleanly; the other four counts
+     * populate normally.
+     *
+     * <p>Viewer ID is resolved via {@link AuthenticatedUser#currentUserIdOrNull()}
+     * — the centralised helper that returns {@code null} for anonymous
+     * requests and for authenticated requests where the JWT lacks the
+     * {@code user_id} claim. Pushing the {@code null} into the service
+     * (rather than wrapping in an {@code Optional} at the seam) keeps the
+     * controller a thin pass-through.</p>
+     */
+    @GetMapping("/token/{symbol}/counts")
+    @PreAuthorize("permitAll()")
+    @Operation(summary = "Aggregate counts for Your network / Platform / Comments / Mentions / News tabs")
+    @ApiResponse(responseCode = "200", description = "DiscussionCounts with five Long fields (news nullable)")
+    public DiscussionCounts getTokenCounts(@PathVariable String symbol) {
+        Long viewerUserIdOrNull = authenticatedUser.currentUserIdOrNull();
+        return discussionService.getCountsForSymbol(symbol, viewerUserIdOrNull);
     }
 }

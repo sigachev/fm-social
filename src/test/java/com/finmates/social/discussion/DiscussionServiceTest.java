@@ -3,6 +3,8 @@ package com.finmates.social.discussion;
 import com.finmates.social.comment.CommentRepository;
 import com.finmates.social.comment.MentionRow;
 import com.finmates.social.common.PageResponse;
+import com.finmates.social.follow.FollowRepository;
+import com.finmates.social.post.PostRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -15,8 +17,10 @@ import org.mockito.quality.Strictness;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -36,6 +40,8 @@ import static org.mockito.Mockito.when;
 class DiscussionServiceTest {
 
     @Mock CommentRepository commentRepository;
+    @Mock PostRepository postRepository;
+    @Mock FollowRepository followRepository;
 
     @InjectMocks DiscussionService service;
 
@@ -180,5 +186,91 @@ class DiscussionServiceTest {
         when(row.getCreatedAt()).thenReturn(now);
         when(row.getUpdatedAt()).thenReturn(now);
         return row;
+    }
+
+    // ── getCountsForSymbol ────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("anonymous viewer → yourNetwork is 0, no follow lookup, other counts still computed")
+    void getCountsForSymbol_anonViewer_yourNetworkIsZero() {
+        when(postRepository.countByCashtagGlobal(anyString())).thenReturn(7L);
+        when(commentRepository.countActiveByAssetSymbol("ETH")).thenReturn(3L);
+        when(commentRepository.countMentionsForSymbol("ETH")).thenReturn(2L);
+
+        DiscussionCounts counts = service.getCountsForSymbol("ETH", null);
+
+        assertThat(counts.yourNetwork()).isZero();
+        assertThat(counts.platform()).isEqualTo(7L);
+        assertThat(counts.comments()).isEqualTo(3L);
+        assertThat(counts.mentions()).isEqualTo(2L);
+        assertThat(counts.news()).isNull();
+        // Critical: no follow lookup and no by-authors count for anon.
+        verify(followRepository, org.mockito.Mockito.never()).findAllFollowingIds(any());
+        verify(postRepository, org.mockito.Mockito.never()).countByCashtagAndAuthors(anyString(), any());
+    }
+
+    @Test
+    @DisplayName("authed viewer with empty follow list → yourNetwork is 0, no by-authors count call")
+    void getCountsForSymbol_authViewerWithEmptyFollows_yourNetworkIsZero() {
+        when(followRepository.findAllFollowingIds(42L)).thenReturn(Set.of());
+
+        DiscussionCounts counts = service.getCountsForSymbol("ETH", 42L);
+
+        assertThat(counts.yourNetwork()).isZero();
+        verify(postRepository, org.mockito.Mockito.never()).countByCashtagAndAuthors(anyString(), any());
+    }
+
+    @Test
+    @DisplayName("authed viewer with follows → by-authors count called with the same follow set")
+    void getCountsForSymbol_authViewerWithFollows_callsRepoWithFollowedList() {
+        Set<Long> follows = Set.of(11L, 12L, 13L);
+        when(followRepository.findAllFollowingIds(42L)).thenReturn(follows);
+        when(postRepository.countByCashtagAndAuthors(anyString(), eq(follows))).thenReturn(5L);
+
+        DiscussionCounts counts = service.getCountsForSymbol("ETH", 42L);
+
+        assertThat(counts.yourNetwork()).isEqualTo(5L);
+        verify(postRepository).countByCashtagAndAuthors(eq("%$eth%"), eq(follows));
+    }
+
+    @Test
+    @DisplayName("symbol is trimmed/uppercased; cashtag pattern is lowercased once for SQL LIKE")
+    void getCountsForSymbol_normalizesSymbolAndPattern() {
+        service.getCountsForSymbol("  EtH  ", null);
+
+        // platform uses the pattern; comments/mentions use the uppercased symbol.
+        verify(postRepository).countByCashtagGlobal(eq("%$eth%"));
+        verify(commentRepository).countActiveByAssetSymbol(eq("ETH"));
+        verify(commentRepository).countMentionsForSymbol(eq("ETH"));
+    }
+
+    @Test
+    @DisplayName("response always carries all five fields; news is null in v1")
+    void getCountsForSymbol_returnsAllFiveFields() {
+        DiscussionCounts counts = service.getCountsForSymbol("ETH", null);
+
+        // All five accessor methods present and non-throwing.
+        assertThat(counts.yourNetwork()).isNotNull();
+        assertThat(counts.platform()).isNotNull();
+        assertThat(counts.comments()).isNotNull();
+        assertThat(counts.mentions()).isNotNull();
+        // News is the v1 null sentinel — FE branches on this.
+        assertThat(counts.news()).isNull();
+    }
+
+    @Test
+    @DisplayName("null symbol is treated as empty (defensive — controller shouldn't send this, but service is robust)")
+    void getCountsForSymbol_nullSymbol_returnsAllZeroLikeCounts() {
+        // Pattern becomes "%$%" — won't match anything legitimate, but more
+        // importantly: the service must not NPE. Repos stubbed to default
+        // long 0 by Mockito.
+        DiscussionCounts counts = service.getCountsForSymbol(null, null);
+
+        assertThat(counts).isNotNull();
+        assertThat(counts.yourNetwork()).isZero();
+        assertThat(counts.platform()).isZero();
+        assertThat(counts.comments()).isZero();
+        assertThat(counts.mentions()).isZero();
+        assertThat(counts.news()).isNull();
     }
 }

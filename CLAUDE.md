@@ -262,6 +262,50 @@ JPQL doesn't express this cleanly across dialects, so the queries are native SQL
 | DELETE | `/api/blocks/{userId}` | Unblock user |
 | GET | `/api/blocks` | My block list |
 
+### DiscussionController — `/api/discussion` (added 2026-05-15)
+
+Read-only controller backing the token detail page's Discussion panel.
+Class-level `@PreAuthorize("isAuthenticated()")` so any future write endpoints
+fail closed; each read endpoint intended to be anonymous overrides with
+method-level `@PreAuthorize("permitAll()")` **and** has its URL listed in
+`SecurityConfig.PUBLIC_PATHS` — both are required. The class-level annotation
+gates method dispatch via `@EnableMethodSecurity`; the URL list gates filter-chain
+entry. The existing `/api/posts/by-cashtag` is the precedent.
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/discussion/token/{symbol}/mentions` | permitAll | Mentions tab — top-level ACTIVE comments cashtagging `{symbol}` from surfaces OTHER than `{symbol}`'s own asset page. Pagination: `page` + `size` (default 0/20, max size 100). Returns `PageResponse<MentionResponse>`. |
+
+**Scope decisions (Phase 2):**
+- **ASSET + POST targets only.** PORTFOLIO comments are indexed (V17 extraction
+  runs on every write regardless of `target_type`) but not surfaced in v1.
+  Turning PORTFOLIO on later is a single-clause SQL change + a
+  `UserLookupCache.bulkGet(...)` for owner usernames — deferred until demand
+  justifies the cross-service surface area. See **Deferred Features**.
+- **No block-list filtering in v1.** Aligned with `/api/posts/by-cashtag`'s
+  current behaviour. Block-list filtering will land holistically across the
+  whole Discussion panel rather than per-tab.
+- **No viewer personalisation.** Same response shape for everyone — no
+  network-scope branching, no per-viewer ranking. Caches well at the CDN
+  layer if/when fronted by one.
+
+**Predicate / index contract.** Postgres GIN on `text[]` does **not** support
+`val = ANY(col_array)` — that syntax desugars to an OR-chain over equalities
+and bypasses the index. The repo query uses `col @> ARRAY[CAST(:val AS TEXT)]`
+form so `comments_extracted_cashtags_gin` (V17) drives the outer Bitmap Heap
+Scan. The slice test `CommentRepositoryMentionsTest.ginIndexUsedForOuterScan`
+asserts this against a Testcontainers PG instance — if anyone changes the
+predicate back to `= ANY(...)` the test fails loudly.
+
+`DiscussionService.getMentionsForSymbol(symbol, page, size)` is the service
+entrypoint. It trims+uppercases the symbol (defence in depth), clamps
+`size` to `[1, 100]` and `page` to `>= 0`, then issues two native queries
+— the list with two correlated reply-count subqueries, and the count for
+the page envelope. Per-mention reply counts are computed correlated rather
+than denormalised; that decision is deferred indefinitely (`reply_count`
+column on `comments` would require trigger or service-layer mutation on
+every reply create / soft-delete / restore + a backfill).
+
 ## JWT `user_id` Claim Dependency
 
 **All write endpoints and most read endpoints require a `user_id` claim in the JWT.**
@@ -376,8 +420,12 @@ The secret is shared across services — fm-messaging and fm-notifications will 
 | thumbnailKey S3 promotion (upload endpoint + copy-on-update) | Prompt 5 | TODO |
 | Moderation foundation (Prompt 6a) | Prompt 6 | **DONE** â€” V13 removal columns, V14 reports table, ReportController/Service, internal remove/restore endpoints, InternalSecretFilter, UserBanCheckService |
 | Frontend wiring | Prompt 7 | Not started |
-| Testcontainers-backed test profile | post-Phase-2 | **TODO** — set up an `application-test.yml` + Testcontainers PG so integration tests can run without touching the shared dev DB at `finmates.com:5432`. Currently blocks repository slice tests for the Mentions tab (Phase 2) and any future `@SpringBootTest`. Until this lands, `./mvnw test` (bare) is unsafe and the Jenkinsfile uses `-DskipTests`. |
+| Testcontainers-backed test profile | Phase 2 | **DONE** — `application-test.yml` with `jdbc:tc:postgresql:17:///fmsocialtest`, opt-in via `@ActiveProfiles("test")`. See **Testcontainers** section below. |
 | Cashtag regex digit-prefix relaxation | post-launch | **TODO** — current regex `[A-Za-z][A-Za-z0-9]{0,14}` excludes digit-prefix tickers (`1INCH`, `00`, …). Acceptable for v1; relax to `[A-Za-z0-9][A-Za-z0-9]{0,14}` if usage data shows real demand. Requires synchronised changes to FE `mentionSegments.ts`, BE `CashtagExtractor`, and a new migration backfilling `comments.extracted_cashtags`. |
+| Mentions: surface PORTFOLIO targets | v1.1+ | **TODO** — PORTFOLIO comments are indexed in V17 but excluded from the Mentions query at the SQL level (single `target_type IN ('ASSET','POST')` clause). Adding them needs (a) removing the clause + (b) `UserLookupCache.bulkGet(...)` for owner usernames since `profiles` has no `username` column. Defer until demand justifies the cross-service surface area. |
+| Mentions: block-list filtering | post-launch | **TODO** — Mentions doesn't filter out comments from users the viewer has blocked. Aligned with `/api/posts/by-cashtag`'s current behaviour. Address holistically when Discussion-panel block filtering ships across all tabs. |
+| Upgrade prod Postgres from 17 beta 3 to a stable 17.x | hygiene | **TODO** — `finmates.com:5432` runs `17beta3 (Debian 17~beta3-1.pgdg120+1)`. Affects all FinMates services on the shared instance. No known immediate issues; this is hygiene. Testcontainers test profile uses stable `postgres:17` to avoid relying on beta tags from Docker Hub. |
+| Mentions: nginx ingress rate-limit pattern | ops follow-up | **TODO** — verify the existing nginx ingress rate-limit covers `/api/discussion/*` (mixed-auth permitAll surface). If no pattern exists for unauthenticated reads beyond `/api/posts/by-cashtag`, add one. Not a blocker for v1. |
 
 ## Service Dependencies
 
@@ -515,6 +563,70 @@ If you change one, change all three atomically and re-run the manual FE/BE cross
 - Empty / null input → empty list (never null). Replacement semantics on edit (the old list is overwritten, not merged).
 
 **Known asymmetry — digit-prefix tickers do not match.** Assets whose canonical symbol begins with a digit (`1INCH`, `00`, etc.) cannot be extracted because the FE regex requires `[A-Za-z]` first. The BE mirrors this on purpose so the extracted set always equals the FE-rendered set. Users referencing these tokens in prose will not surface them in the Mentions tab. Tracked under **Deferred Features** below.
+
+**Read path (Phase 2).** The Mentions tab query at
+`GET /api/discussion/token/{symbol}/mentions` is the first reader of
+`extracted_cashtags`. The repo method uses
+`extracted_cashtags @> ARRAY[CAST(:currentSymbol AS TEXT)]` (containment),
+**not** `:currentSymbol = ANY(extracted_cashtags)` — the latter desugars
+to OR-chains and bypasses the GIN. See **DiscussionController** above for
+the full predicate / index contract and the slice test that asserts it.
+
+
+## Testcontainers (Phase 2 — 2026-05-15)
+
+Repository slice tests and any future `@SpringBootTest` / `@DataJpaTest`
+need a real Postgres without touching the shared dev DB at
+`finmates.com:5432`. fm-social uses Testcontainers via the JDBC-URL form
+so there's **no base class to extend**, no `@DynamicPropertySource`, no
+extra Spring beans — just a profile.
+
+**How to write a DB-touching test.** Annotate the class:
+
+```java
+@DataJpaTest
+@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
+@ActiveProfiles("test")
+@TestPropertySource(properties = "spring.jpa.hibernate.ddl-auto=validate")
+class MyRepoTest { ... }
+```
+
+That activates `src/test/resources/application-test.yml`, which points the
+datasource at `jdbc:tc:postgresql:17:///fmsocialtest?TC_REUSABLE=true`.
+Testcontainers spins up `postgres:17`, Flyway applies V1–V17 against it,
+and `@DataJpaTest` rolls back each test's transaction. The existing
+slice test `CommentRepositoryMentionsTest` is the worked example.
+
+**Critical: opt-in only.** Tests without `@ActiveProfiles("test")` never
+load `application-test.yml`. The pure-JUnit / Mockito suite
+(`CashtagExtractorTest`, `CommentServiceTest`, `DiscussionServiceTest`,
+`DiscussionControllerTest`, the existing connections / follow / feed
+tests) all run with zero Docker dependency. `./mvnw.cmd test
+-Dtest=ClassA,ClassB` is the right shape — bare `./mvnw test` would still
+pick up `FmSocialApplicationTests` (the known-broken context-loads test)
+and is unsafe; that's an unrelated existing gotcha, not a Testcontainers
+concern.
+
+**Postgres version pin.** Container image tag is **`postgres:17`** (stable),
+chosen to match production's major version. Prod currently runs
+`17beta3 (Debian 17~beta3-1.pgdg120+1)` — see the Deferred Features entry
+for the upgrade-to-stable-17.x follow-up. We deliberately don't pin to the
+beta tag: Docker Hub doesn't reliably maintain beta tags, and the Mentions
+query uses nothing version-specific between PG 13–17 (`regexp_matches` with
+lookbehind, GIN on `text[]`, `@>`, correlated subqueries).
+
+**Container reuse (per-developer opt-in).** The `?TC_REUSABLE=true` URL
+param is silently ignored unless `~/.testcontainers.properties` contains
+`testcontainers.reuse.enable=true`. With reuse off, a fresh `postgres:17`
+spins up per test class (~15–20s overhead per class on a warm Docker
+Desktop). With reuse on, the container survives across classes and JVM
+invocations until explicitly removed — far faster for iterative
+development. The setup is per-developer, not committed.
+
+**Docker dependency call-out.** Slice tests fail fast at JDBC connect
+time when Docker Desktop isn't running with the Linux-containers engine.
+That's intentional — preferable to a 60s Testcontainers connection
+timeout. The slice test class javadoc documents the requirement.
 
 **Don't add Spring to the extractor.** Pure-function-as-static-utility is what lets the test suite run without a Spring context, which is what lets us avoid the broken `FmSocialApplicationTests` and the shared-dev-DB hazard documented in **Known Gotchas**.
 

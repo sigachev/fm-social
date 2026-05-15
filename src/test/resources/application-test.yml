@@ -1,0 +1,46 @@
+# Testcontainers-backed test profile.
+#
+# Opt-in only — applied solely to test classes annotated with
+# @ActiveProfiles("test"). Existing pure-JUnit / Mockito tests
+# (CashtagExtractorTest, CommentServiceTest, ConnectionsPermissionServiceTest,
+# FollowingFeedServiceTest, FollowsInternalControllerTest, CryptoPerformanceClientTest,
+# DiscussionServiceTest, DiscussionControllerTest) carry no @ActiveProfiles and
+# therefore never load this file — no Docker spinup for them.
+#
+# Postgres major pinned to 17 to match production (finmates.com:5432 runs
+# 17beta3; we use the stable 17 image to avoid relying on beta tags that
+# may be removed from Docker Hub). The Mentions query uses nothing
+# version-specific between PG13-17 (regexp_matches with lookbehind, GIN on
+# text[], ANY(), correlated subqueries are all stable across that range).
+#
+# TC_REUSABLE=true lets the container survive across test-class boundaries
+# when the per-developer flag testcontainers.reuse.enable=true is set in
+# ~/.testcontainers.properties. Without that flag, the param is silently
+# ignored and a fresh container starts per test class (slower, identical
+# behavior).
+#
+# REQUIRES: Docker Desktop running with Linux-containers engine. Slice tests
+# fail fast at JDBC connect time when Docker isn't reachable — by design.
+
+spring:
+  datasource:
+    url: jdbc:tc:postgresql:17:///fmsocialtest?TC_REUSABLE=true
+    driver-class-name: org.testcontainers.jdbc.ContainerDatabaseDriver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate.dialect: org.hibernate.dialect.PostgreSQLDialect
+      hibernate.jdbc.lob.non_contextual_creation: true
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+  # Security autoconfig requires a JWK set URI to bootstrap the JwtDecoder
+  # bean even in @DataJpaTest slice contexts that don't exercise security.
+  # Point at a noop URI; slice tests never hit the auth filter chain.
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: http://localhost/no-op-jwks-for-tests

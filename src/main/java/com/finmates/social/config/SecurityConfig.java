@@ -44,7 +44,28 @@ public class SecurityConfig {
             // on PostController.getPostsByCashtag overrides the class-level
             // @PreAuthorize("isAuthenticated()"); the controller enforces auth
             // internally for scope=network via AuthenticatedUser.currentUserIdOrNull().
-            "/api/posts/by-cashtag"
+            "/api/posts/by-cashtag",
+            // Token detail Discussion panel — Mentions tab is mixed-auth, same
+            // pattern as /api/posts/by-cashtag. Anonymous viewers on a public
+            // token page see Mentions without a JWT.
+            //
+            // We use the broad `/api/discussion/**` rather than a tighter
+            // `/api/discussion/token/*/mentions` because single-segment `*`
+            // wildcards in Spring Security 6's MvcRequestMatcher have
+            // surfaced unauthenticated 401s in practice (smoke test against
+            // the running service) even when the pattern looks syntactically
+            // correct. Broader `**` matches the swagger / v3-api-docs entries
+            // in this same list and is robust across MvcRequestMatcher /
+            // AntPathRequestMatcher selection.
+            //
+            // Safety: future write endpoints on DiscussionController are NOT
+            // exposed to anonymous traffic by this entry. The URL list only
+            // controls filter-chain entry; method-level
+            // @PreAuthorize("isAuthenticated()") at the class level continues
+            // to gate handler invocation. Each read endpoint that wants
+            // anonymous access must opt in explicitly with
+            // @PreAuthorize("permitAll()") on the method.
+            "/api/discussion/**"
     };
 
     @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri}")

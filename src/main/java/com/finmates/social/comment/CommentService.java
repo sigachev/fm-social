@@ -190,7 +190,11 @@ public class CommentService {
                 comment.getUpdatedAt(),
                 comment.getRemovedAt(),
                 comment.getRemovalReason(),
-                comment.getRemovedBy()
+                comment.getRemovedBy(),
+                // replyCount / replyCountAlsoMentioning are Mentions-only;
+                // the standard /api/comments/* list endpoints leave them null.
+                null,
+                null
         );
     }
 }

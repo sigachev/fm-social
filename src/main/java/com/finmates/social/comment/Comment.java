@@ -4,8 +4,12 @@ import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Getter
 @Setter
@@ -40,6 +44,20 @@ public class Comment {
 
     @Column(name = "content", nullable = false, columnDefinition = "TEXT")
     private String content;
+
+    /**
+     * Canonical (uppercase, sorted, deduplicated) cashtag symbols extracted
+     * from {@link #content} at write time by
+     * {@link com.finmates.social.util.CashtagExtractor}. Backs the GIN-indexed
+     * Mentions tab query introduced in Phase 2.
+     *
+     * <p>Replacement semantics: every create/update overwrites this list with
+     * a fresh extraction — never an append. Field default ensures new entities
+     * never serialise {@code null} even if the extractor is bypassed in tests.</p>
+     */
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    @Column(name = "extracted_cashtags", columnDefinition = "text[]", nullable = false)
+    private List<String> extractedCashtags = new ArrayList<>();
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)

@@ -10,6 +10,7 @@ import com.finmates.social.comment.dto.CommentUpdateRequest;
 import com.finmates.social.edit.CommentEdit;
 import com.finmates.social.edit.CommentEditRepository;
 import com.finmates.social.post.PostRepository;
+import com.finmates.social.util.CashtagExtractor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Pageable;
@@ -48,6 +49,10 @@ public class CommentService {
         comment.setTargetSymbol(req.getTargetSymbol() != null ? req.getTargetSymbol().toUpperCase() : null);
         comment.setParentId(req.getParentId());
         comment.setContent(req.getContent());
+        // Mentions tab: index cashtags at write time so the GIN-backed query in
+        // Phase 2 stays cheap. Replacement semantics — see CashtagExtractor.
+        // Fires for replies (parent_id != null) too; the table is uniform.
+        comment.setExtractedCashtags(CashtagExtractor.extract(req.getContent()));
 
         Comment saved = commentRepository.save(comment);
 
@@ -80,6 +85,9 @@ public class CommentService {
         commentEditRepository.save(edit);
 
         comment.setContent(req.getContent());
+        // Re-extract on edit so cashtag removals are reflected — replacement,
+        // never append. Mirrors the create-path policy above.
+        comment.setExtractedCashtags(CashtagExtractor.extract(req.getContent()));
         comment.setEditCount(comment.getEditCount() + 1);
         comment.setLastEditedAt(OffsetDateTime.now());
         return toResponse(commentRepository.save(comment));

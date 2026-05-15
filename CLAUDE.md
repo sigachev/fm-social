@@ -79,7 +79,7 @@ OpenAPI JSON: `http://localhost:8091/v3/api-docs`
 - Migrations run automatically on startup
 - `baseline-on-migrate: false` — `social` DB must be empty on first run
 
-### Table Overview (as of V14)
+### Table Overview (as of V17)
 
 | Table | Migration | Purpose |
 |-------|-----------|---------|
@@ -99,6 +99,9 @@ OpenAPI JSON: `http://localhost:8091/v3/api-docs`
 | posts (backfill) | V12 | Backfilled author_username for pre-V11 posts via internal lookup |
 | posts + comments (removal audit) | V13 | Added removed_at, removed_by, removal_reason for admin moderation |
 | `reports` | V14 | User-submitted reports table — canonical moderation queue (dedup, rate-limited) |
+| moderation tables dropped | V15 | Dropped unused `moderation_actions`, `content_reports` (superseded by `reports`) |
+| follows + profiles (privacy) | V16 | Added `follows.status` (PENDING/ACCEPTED) and `profiles.is_private` for follow-request gating |
+| comments (cashtag index) | V17 | Added `extracted_cashtags TEXT[]` + `comments_extracted_cashtags_gin` GIN index — populated on every write by `CashtagExtractor`; backs the Mentions tab query (Phase 2). See **Cashtag Extraction** below. |
 
 ## Implemented REST Endpoints (Prompt 3 — 2026-04-16)
 
@@ -373,6 +376,8 @@ The secret is shared across services — fm-messaging and fm-notifications will 
 | thumbnailKey S3 promotion (upload endpoint + copy-on-update) | Prompt 5 | TODO |
 | Moderation foundation (Prompt 6a) | Prompt 6 | **DONE** â€” V13 removal columns, V14 reports table, ReportController/Service, internal remove/restore endpoints, InternalSecretFilter, UserBanCheckService |
 | Frontend wiring | Prompt 7 | Not started |
+| Testcontainers-backed test profile | post-Phase-2 | **TODO** — set up an `application-test.yml` + Testcontainers PG so integration tests can run without touching the shared dev DB at `finmates.com:5432`. Currently blocks repository slice tests for the Mentions tab (Phase 2) and any future `@SpringBootTest`. Until this lands, `./mvnw test` (bare) is unsafe and the Jenkinsfile uses `-DskipTests`. |
+| Cashtag regex digit-prefix relaxation | post-launch | **TODO** — current regex `[A-Za-z][A-Za-z0-9]{0,14}` excludes digit-prefix tickers (`1INCH`, `00`, …). Acceptable for v1; relax to `[A-Za-z0-9][A-Za-z0-9]{0,14}` if usage data shows real demand. Requires synchronised changes to FE `mentionSegments.ts`, BE `CashtagExtractor`, and a new migration backfilling `comments.extracted_cashtags`. |
 
 ## Service Dependencies
 
@@ -482,6 +487,36 @@ the CDN domain or bucket changes.
 
 Asset symbols are always stored **uppercase**: `BTC`, `ETH`, `SOL`. Normalize on input:
 `symbol.trim().toUpperCase()` before any DB write or Redis key construction.
+
+
+## Cashtag Extraction (Phase 1 — 2026-05-14)
+
+`comments.extracted_cashtags TEXT[]` is populated on every comment write — both `createComment` and `updateComment`, both top-level and replies (`parent_id` is irrelevant to extraction). The column has a `DEFAULT '{}'` and is backed by `comments_extracted_cashtags_gin`. It feeds the Mentions tab query in Phase 2.
+
+| Concern | Where |
+|---|---|
+| BE extractor | `com.finmates.social.util.CashtagExtractor` (pure static utility, no Spring) |
+| FE extractor | `F:\Projects\finmates-front\src\components\mentions\mentionSegments.ts:18` |
+| SQL backfill | `V17__cashtag_extraction.sql` |
+| Unit tests | `CashtagExtractorTest` (pure JUnit) + `CommentServiceTest` (Mockito wiring) |
+
+**The regex is duplicated in three places — keep them in lockstep.** All three must be:
+
+```
+(?<![A-Za-z0-9])\$([A-Za-z][A-Za-z0-9]{0,14})
+```
+
+If you change one, change all three atomically and re-run the manual FE/BE cross-check documented at the top of `CashtagExtractorTest`. The contract is: for every input string, FE `collectSegments()`, BE `CashtagExtractor.extract()`, and the V17 backfill subquery must produce the same canonical (uppercase, sorted, deduplicated) set of cashtags.
+
+**Semantics:**
+- Word-start enforcement via lookbehind — `$` must not be preceded by `[A-Za-z0-9]`.
+- Symbol shape: first char is a letter, then 0–14 alphanumerics (1–15 chars total).
+- Accepts any case in source (`$eth`, `$Eth`, `$ETH`) and canonicalises to uppercase.
+- Empty / null input → empty list (never null). Replacement semantics on edit (the old list is overwritten, not merged).
+
+**Known asymmetry — digit-prefix tickers do not match.** Assets whose canonical symbol begins with a digit (`1INCH`, `00`, etc.) cannot be extracted because the FE regex requires `[A-Za-z]` first. The BE mirrors this on purpose so the extracted set always equals the FE-rendered set. Users referencing these tokens in prose will not surface them in the Mentions tab. Tracked under **Deferred Features** below.
+
+**Don't add Spring to the extractor.** Pure-function-as-static-utility is what lets the test suite run without a Spring context, which is what lets us avoid the broken `FmSocialApplicationTests` and the shared-dev-DB hazard documented in **Known Gotchas**.
 
 
 ## Moderation Architecture (Prompt 6a â€” 2026-04-17)

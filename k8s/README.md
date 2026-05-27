@@ -1,7 +1,9 @@
 # fm-social Kubernetes Manifests
 
 Matches the `main` service deployment pattern (single `SPRING_PROFILES_ACTIVE=k8s` env var,
-credentials hardcoded in `application-k8s.yml`, one secret injected from K8s).
+non-credential config in `application-k8s.yml`, secrets injected from K8s). DB credentials are
+sourced from `postgres-secret` via env vars (no longer hardcoded) so the k8s profile fails fast
+if the secret isn't injected.
 
 ## Files
 
@@ -56,16 +58,14 @@ kubectl rollout status deployment/social -n dev
 
 ## Required Secrets in `dev` Namespace
 
-Only **one** secret is required — all other credentials are hardcoded in `application-k8s.yml`
-(matching the `main` service pattern):
-
 | Secret | Key | Used for |
 |--------|-----|----------|
 | `fm-internal-secret` | `internal-shared-secret` | `INTERNAL_SHARED_SECRET` env var |
+| `postgres-secret` | `POSTGRES_USER`, `POSTGRES_PASSWORD` | Social DB credentials (existing — shared in-cluster Postgres secret; injected via `secretKeyRef` so the k8s profile fails fast if absent rather than falling back to a hardcoded password) |
 
-Verify the secret exists:
+Verify the secrets exist:
 ```bash
-kubectl get secret fm-internal-secret -n dev
+kubectl get secret fm-internal-secret postgres-secret -n dev
 ```
 
 ## REPLACE_AT_BUILD Placeholder

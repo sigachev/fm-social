@@ -3,9 +3,11 @@ server:
 
 spring:
   datasource:
+    # DB credentials sourced from postgres-secret via env vars (see k8s/deployment.yaml).
+    # No defaults — pod must fail fast at startup if the secret isn't injected.
     url: jdbc:postgresql://postgres.dev.svc.cluster.local:5432/social
-    username: user
-    password: Int6859351!
+    username: ${POSTGRES_USER}
+    password: ${POSTGRES_PASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: 5

@@ -30,8 +30,10 @@ import java.util.stream.Collectors;
 @Slf4j
 public class FeedService {
 
-    private final FollowRepository followRepository;
-    private final PostRepository postRepository;
+    @Autowired
+    private FollowRepository followRepository;
+    @Autowired
+    private PostRepository postRepository;
     @Autowired(required = false)
     private RedisTemplate<String, String> redisTemplate;
 

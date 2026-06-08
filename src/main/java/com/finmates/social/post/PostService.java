@@ -314,8 +314,8 @@ public class PostService {
     public enum CashtagScope { NETWORK, GLOBAL }
 
     /**
-     * Redis key prefix for the {@code scope=GLOBAL} cache. TTL 2 minutes via
-     * {@link #setIfAbsent} below. NETWORK scope is per-viewer and not cached.
+     * Redis key prefix for the {@code scope=GLOBAL} cache. TTL 2 minutes.
+     * NETWORK scope is per-viewer and not cached.
      *
      * <p>Cache TTL 2min. New posts surface after at most 2 minutes. No best-effort
      * invalidation on write — the cost of cashtag-parsing every PostService.createPost

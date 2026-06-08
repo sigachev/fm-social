@@ -18,6 +18,10 @@ spring:
           jwk-set-uri: https://auth.finmates.com/realms/finmates/protocol/openid-connect/certs
           issuer-uri: https://auth.finmates.com/realms/finmates
 
+fm-social:
+  redis:
+    use-redis: false
+
 finmates:
   services:
     main-url: http://localhost:8081

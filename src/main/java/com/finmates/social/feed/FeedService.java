@@ -3,8 +3,8 @@ package com.finmates.social.feed;
 import com.finmates.social.follow.FollowRepository;
 import com.finmates.social.post.Post;
 import com.finmates.social.post.PostRepository;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -24,15 +24,16 @@ import java.util.stream.Collectors;
  * Value: post ID as string.
  *
  * Fan-out is synchronous for now; flagged for async queue in a future prompt.
+ * When {@code fm-social.redis.use-redis=false}, Redis operations are no-ops.
  */
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class FeedService {
 
     private final FollowRepository followRepository;
     private final PostRepository postRepository;
-    private final RedisTemplate<String, String> redisTemplate;
+    @Autowired(required = false)
+    private RedisTemplate<String, String> redisTemplate;
 
     @Value("${finmates.feed.max-entries-per-user:1000}")
     private int maxEntriesPerUser;
@@ -73,6 +74,10 @@ public class FeedService {
     }
 
     private void pushToFeed(String key, String value, double score) {
+        if (redisTemplate == null) {
+            log.debug("Redis disabled, skipping feed push for key={}", key);
+            return;
+        }
         try {
             redisTemplate.opsForZSet().add(key, value, score);
             // Trim to max entries (keep newest: remove rank 0 to -(maxEntriesPerUser+1))
@@ -96,6 +101,10 @@ public class FeedService {
      * @return list of post IDs, newest first
      */
     public List<Long> getFeed(Long userId, long cursorTimestamp, int limit) {
+        if (redisTemplate == null) {
+            log.debug("Redis disabled, returning empty feed for user={}", userId);
+            return Collections.emptyList();
+        }
         try {
             double maxScore = cursorTimestamp == Long.MAX_VALUE ? Double.MAX_VALUE : (double)(cursorTimestamp - 1);
             Set<String> entries = redisTemplate.opsForZSet()
@@ -153,6 +162,9 @@ public class FeedService {
      * Used to compute the next cursor.
      */
     public Long getPostTimestamp(Long userId, Long postId) {
+        if (redisTemplate == null) {
+            return null;
+        }
         try {
             Double score = redisTemplate.opsForZSet().score(feedKey(userId), String.valueOf(postId));
             return score != null ? score.longValue() : null;

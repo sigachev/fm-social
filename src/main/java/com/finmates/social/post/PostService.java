@@ -20,6 +20,7 @@ import com.finmates.social.upload.S3Service;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -48,7 +49,8 @@ public class PostService {
     private final ProfileRepository profileRepository;
     private final FollowRepository followRepository;
     private final BlockRepository blockRepository;
-    private final RedisTemplate<String, String> redisTemplate;
+    @Autowired(required = false)
+    private RedisTemplate<String, String> redisTemplate;
     private final ObjectMapper objectMapper;
 
     /** Short-lived cache: avoids a profile DB hit per post during feed / profile renders. */
@@ -69,7 +71,6 @@ public class PostService {
                        ProfileRepository profileRepository,
                        FollowRepository followRepository,
                        BlockRepository blockRepository,
-                       RedisTemplate<String, String> redisTemplate,
                        ObjectMapper objectMapper) {
         this.postRepository = postRepository;
         this.postEditRepository = postEditRepository;
@@ -78,7 +79,6 @@ public class PostService {
         this.profileRepository = profileRepository;
         this.followRepository = followRepository;
         this.blockRepository = blockRepository;
-        this.redisTemplate = redisTemplate;
         this.objectMapper = objectMapper;
     }
 
@@ -376,19 +376,21 @@ public class PostService {
      * the response list as JSON and write back with the 2-min TTL.
      */
     private List<PostResponse> getGlobalCashtagPostsCached(String normalizedSymbol,
-                                                           String pattern,
-                                                           int limit) {
+                                                            String pattern,
+                                                            int limit) {
         final String cacheKey = CASHTAG_CACHE_KEY_PREFIX + normalizedSymbol + ":" + limit;
 
-        // Cache read — best-effort. Redis outage falls through to the DB path.
-        try {
-            String cached = redisTemplate.opsForValue().get(cacheKey);
-            if (cached != null) {
-                return objectMapper.readValue(cached, new TypeReference<List<PostResponse>>() {});
+        // Cache read — best-effort. Redis outage (or disabled) falls through to the DB path.
+        if (redisTemplate != null) {
+            try {
+                String cached = redisTemplate.opsForValue().get(cacheKey);
+                if (cached != null) {
+                    return objectMapper.readValue(cached, new TypeReference<List<PostResponse>>() {});
+                }
+            } catch (Exception e) {
+                log.warn("Cashtag cache read failed for key={}, falling through to DB: {}",
+                        cacheKey, e.getMessage());
             }
-        } catch (Exception e) {
-            log.warn("Cashtag cache read failed for key={}, falling through to DB: {}",
-                    cacheKey, e.getMessage());
         }
 
         List<Post> rows = postRepository.findByCashtagGlobal(pattern, limit);
@@ -396,11 +398,13 @@ public class PostService {
         List<PostResponse> responses = rows.stream().map(this::toResponse).toList();
 
         // Cache write — best-effort. Failure is non-fatal (next request rebuilds).
-        try {
-            String json = objectMapper.writeValueAsString(responses);
-            redisTemplate.opsForValue().set(cacheKey, json, CASHTAG_CACHE_TTL);
-        } catch (Exception e) {
-            log.warn("Cashtag cache write failed for key={}: {}", cacheKey, e.getMessage());
+        if (redisTemplate != null) {
+            try {
+                String json = objectMapper.writeValueAsString(responses);
+                redisTemplate.opsForValue().set(cacheKey, json, CASHTAG_CACHE_TTL);
+            } catch (Exception e) {
+                log.warn("Cashtag cache write failed for key={}: {}", cacheKey, e.getMessage());
+            }
         }
 
         return responses;

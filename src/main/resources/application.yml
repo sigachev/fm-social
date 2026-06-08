@@ -55,6 +55,8 @@ logging:
     org.hibernate.SQL: INFO
 
 fm-social:
+  redis:
+    use-redis: ${FM_SOCIAL_REDIS_USE_REDIS:true}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173,https://finmates.com,https://www.finmates.com}
   s3:

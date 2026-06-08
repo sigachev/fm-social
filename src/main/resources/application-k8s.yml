@@ -51,6 +51,10 @@ spring:
     baseline-on-migrate: false
     locations: classpath:db/migration
 
+fm-social:
+  redis:
+    use-redis: true
+
 finmates:
   services:
     main-url: http://main

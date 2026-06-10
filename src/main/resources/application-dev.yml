@@ -9,6 +9,15 @@ spring:
     url: jdbc:postgresql://finmates.com:5432/social
     username: ${DB_USERNAME:user}
     password: ${DB_PASSWORD:Int6859351!}
+    # See application.yml for the rationale on explicit Hikari sizing here. Dev points at
+    # the shared finmates.com:5432 instance — running multiple local stacks compounds the
+    # connection count. 5 / 0 keeps a single local stack's footprint reasonable.
+    hikari:
+      maximum-pool-size: 5
+      minimum-idle: 0
+      connection-timeout: 10000
+      idle-timeout: 300000
+      max-lifetime: 900000
   data:
     redis:
       host: ${REDIS_HOST:localhost}

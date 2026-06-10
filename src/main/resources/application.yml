@@ -18,6 +18,16 @@ spring:
     locations: classpath:db/migration
   datasource:
     driver-class-name: org.postgresql.Driver
+    # Without an explicit hikari block, Spring Boot defaults to maximum-pool-size=10 /
+    # minimum-idle=10 — every JVM start opens and holds 10 idle connections. On a shared
+    # dev/prod Postgres that adds up fast across local stacks. k8s profile overrides this
+    # block with its own sizing; this base default is what local-dev runs inherit.
+    hikari:
+      maximum-pool-size: 5
+      minimum-idle: 0
+      connection-timeout: 10000
+      idle-timeout: 300000
+      max-lifetime: 900000
   data:
     redis:
       timeout: 2000ms

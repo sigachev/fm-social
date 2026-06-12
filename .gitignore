@@ -16,6 +16,7 @@ target/
 *.ipr
 out/
 .idea_modules/
+.run/
 
 # VS Code
 .vscode/

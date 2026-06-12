@@ -5,6 +5,7 @@ spring:
   autoconfigure:
     exclude:
       - org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.redis.RedisReactiveAutoConfiguration
   datasource:
     url: jdbc:postgresql://finmates.com:5432/social
     username: ${DB_USERNAME:user}
@@ -18,11 +19,6 @@ spring:
       connection-timeout: 10000
       idle-timeout: 300000
       max-lifetime: 900000
-  data:
-    redis:
-      host: ${REDIS_HOST:localhost}
-      port: ${REDIS_PORT:6379}
-      password: ${REDIS_PASSWORD}
   security:
     oauth2:
       resourceserver:

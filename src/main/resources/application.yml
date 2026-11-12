@@ -79,3 +79,10 @@ fm-social:
     allowed-extensions: jpg,jpeg,png,webp,gif
     max-uploads-per-presign-call: 10
     presign-rate-limit-per-minute: 30
+
+# JWT azp (authorized party) allowlist guard — see CLAUDE.md "JWT azp guard"
+finmates:
+  security:
+    azp:
+      allowed: ${FINMATES_SECURITY_AZP_ALLOWED:finmates-app}
+      enforce: ${FINMATES_SECURITY_AZP_ENFORCE:true}

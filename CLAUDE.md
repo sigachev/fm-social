@@ -726,6 +726,16 @@ All `/api/internal/**` paths are `permitAll()` in SecurityConfig but gated by `I
 
 If you ever want to silence the SQL log temporarily during a long-running dev session (e.g. profiling a hot path), override locally via `JAVA_TOOL_OPTIONS=-Dlogging.level.org.hibernate.SQL=INFO` — do NOT commit a change to `application-dev.yml` that downgrades the level.
 
+## JWT azp guard
+
+`com.finmates.social.config.security.AzpAllowlistValidator` rejects access tokens whose `azp` (authorized party) claim is not on an allowlist, so tokens minted for third-party / dynamically registered (DCR / MCP) Keycloak clients cannot be replayed against this API. Canonical source and contract: `docs/adr/azp-guard` in the monorepo root (copy verbatim; only the package line differs).
+
+- Properties: `finmates.security.azp.allowed` (comma list, env `FINMATES_SECURITY_AZP_ALLOWED`, default `finmates-app`) and `finmates.security.azp.enforce` (env `FINMATES_SECURITY_AZP_ENFORCE`, default `true`). Defaults live in the base config.
+- Wiring: `SecurityConfig.withTokenValidators(...)` wraps `JwtValidators.createDefaultWithIssuer(issuerUri)` (issuer + timestamps, unchanged) and `AzpAllowlistValidator` in a `DelegatingOAuth2TokenValidator`. The `jwtDecoder()` bean calls it; the trust-all JWKS fetch is untouched. A rejection is an `InvalidBearerTokenException`, i.e. the normal 401 `invalid_token`.
+- Missing `azp` is rejected when enforcing. Spring validates any presented Bearer token even on `permitAll` paths, so a disallowed-azp token also gets 401 on public endpoints (e.g. `/api/profiles/*/public`, `/api/discussion/**`, `/api/posts/by-cashtag` when called with a Bearer token).
+- Rollout: first deploy with `FINMATES_SECURITY_AZP_ENFORCE=false` (report-only; logs `azp guard (report-only)` once per distinct azp), watch logs, then remove the override. Keycloak DCR must stay closed until every service enforces.
+- Tests: `AzpAllowlistValidatorTest`, `SecurityConfigAzpWiringTest` (run with `-Dtest=AzpAllowlistValidatorTest,SecurityConfigAzpWiringTest`).
+
 ## Known Gotchas
 
 | Issue | Pattern |

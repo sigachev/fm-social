@@ -1,5 +1,6 @@
 package com.finmates.social.config;
 
+import com.finmates.social.config.security.AzpAllowlistValidator;
 import com.finmates.social.config.security.JwtAuthConverter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -10,12 +11,16 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
+import org.springframework.security.oauth2.core.OAuth2TokenValidator;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestTemplate;
+
 
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
@@ -25,6 +30,7 @@ import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
+import java.util.List;
 
 @Configuration
 @EnableWebSecurity
@@ -71,6 +77,14 @@ public class SecurityConfig {
     @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri}")
     private String issuerUri;
 
+    /** Comma-separated azp allowlist. See CLAUDE.md "JWT azp guard". */
+    @Value("${finmates.security.azp.allowed:finmates-app}")
+    private List<String> azpAllowed;
+
+    /** false = report-only (log, never reject) for staged rollout. */
+    @Value("${finmates.security.azp.enforce:true}")
+    private boolean azpEnforce;
+
     private final JwtAuthConverter jwtAuthConverter;
     private final InternalSecretFilter internalSecretFilter;
     private final ProfileEnsureFilter profileEnsureFilter;
@@ -111,7 +125,19 @@ public class SecurityConfig {
         NimbusJwtDecoder decoder = NimbusJwtDecoder.withJwkSetUri(jwkSetUri)
                 .restOperations(restTemplate)
                 .build();
-        decoder.setJwtValidator(JwtValidators.createDefaultWithIssuer(issuerUri));
+        return withTokenValidators(decoder, issuerUri, azpAllowed, azpEnforce);
+    }
+
+    /**
+     * Applies the full validator chain to a decoder: the default validators (timestamps) + issuer
+     * check, plus the azp allowlist guard. Static so the wiring can be tested without a JWKS endpoint.
+     */
+    static NimbusJwtDecoder withTokenValidators(NimbusJwtDecoder decoder, String issuerUri,
+                                                List<String> azpAllowed, boolean azpEnforce) {
+        OAuth2TokenValidator<Jwt> validator = new DelegatingOAuth2TokenValidator<>(
+                JwtValidators.createDefaultWithIssuer(issuerUri),
+                new AzpAllowlistValidator(azpAllowed, azpEnforce));
+        decoder.setJwtValidator(validator);
         return decoder;
     }
 

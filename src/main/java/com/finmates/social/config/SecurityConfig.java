@@ -5,6 +5,7 @@ import com.finmates.social.config.security.JwtAuthConverter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Profile;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -18,18 +19,9 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestTemplate;
 
 
-import javax.net.ssl.HttpsURLConnection;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.TrustManager;
-import javax.net.ssl.X509TrustManager;
-import java.io.IOException;
-import java.net.HttpURLConnection;
-import java.security.SecureRandom;
-import java.security.cert.X509Certificate;
 import java.util.List;
 
 @Configuration
@@ -85,6 +77,20 @@ public class SecurityConfig {
     @Value("${finmates.security.azp.enforce:true}")
     private boolean azpEnforce;
 
+    /**
+     * Optional custom truststore for the JWKS fetch (pods that cannot validate the Keycloak
+     * certificate with the default JVM truststore). Unset = default JVM truststore. The truststore
+     * is used with full chain + host name verification; this is NOT trust-all.
+     */
+    @Value("${finmates.security.jwks.trust-store:}")
+    private String jwksTrustStore;
+
+    @Value("${finmates.security.jwks.trust-store-password:}")
+    private String jwksTrustStorePassword;
+
+    @Value("${finmates.security.jwks.trust-store-type:PKCS12}")
+    private String jwksTrustStoreType;
+
     private final JwtAuthConverter jwtAuthConverter;
     private final InternalSecretFilter internalSecretFilter;
     private final ProfileEnsureFilter profileEnsureFilter;
@@ -97,31 +103,44 @@ public class SecurityConfig {
         this.profileEnsureFilter = profileEnsureFilter;
     }
 
+    private static final String JWKS_PATH = "/protocol/openid-connect/certs";
+
+    /**
+     * JwtDecoder for every profile EXCEPT {@code dev}: the JWKS is fetched with normal TLS
+     * verification (default JVM truststore, or the optional {@code finmates.security.jwks.trust-store}),
+     * including host name verification. Never trust-all here.
+     */
     @Bean
+    @Profile("!dev")
     public JwtDecoder jwtDecoder() throws Exception {
-        SSLContext sslContext = SSLContext.getInstance("TLS");
-        sslContext.init(null, new TrustManager[]{
-            new X509TrustManager() {
-                public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
-                public void checkClientTrusted(X509Certificate[] certs, String authType) {}
-                public void checkServerTrusted(X509Certificate[] certs, String authType) {}
-            }
-        }, new SecureRandom());
+        return verifiedJwtDecoder(issuerUri + JWKS_PATH, issuerUri, azpAllowed, azpEnforce,
+                jwksTrustStore, jwksTrustStorePassword, jwksTrustStoreType);
+    }
 
-        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory() {
-            @Override
-            protected void prepareConnection(HttpURLConnection conn, String method) throws IOException {
-                if (conn instanceof HttpsURLConnection httpsConn) {
-                    httpsConn.setSSLSocketFactory(sslContext.getSocketFactory());
-                    httpsConn.setHostnameVerifier((host, session) -> true);
-                }
-                super.prepareConnection(conn, method);
-            }
-        };
+    /**
+     * {@code dev} profile ONLY: trust-all JWKS fetch for a local Keycloak with a self-signed
+     * certificate. Logs a loud WARN at startup.
+     */
+    @Bean
+    @Profile("dev")
+    public JwtDecoder devTrustAllJwtDecoder() throws Exception {
+        return trustAllJwtDecoder(issuerUri + JWKS_PATH, issuerUri, azpAllowed, azpEnforce);
+    }
 
-        RestTemplate restTemplate = new RestTemplate(factory);
-        String jwkSetUri = issuerUri + "/protocol/openid-connect/certs";
+    /** dev-only composition (TLS verification disabled). */
+    static NimbusJwtDecoder trustAllJwtDecoder(String jwkSetUri, String issuerUri, List<String> azpAllowed,
+                                               boolean azpEnforce) throws Exception {
+        NimbusJwtDecoder decoder = NimbusJwtDecoder.withJwkSetUri(jwkSetUri)
+                .restOperations(JwksTlsSupport.trustAllRestTemplateForDev())
+                .build();
+        return withTokenValidators(decoder, issuerUri, azpAllowed, azpEnforce);
+    }
 
+    /** Production composition for non-dev profiles (static so tests build it exactly as production does). */
+    static NimbusJwtDecoder verifiedJwtDecoder(String jwkSetUri, String issuerUri, List<String> azpAllowed,
+                                               boolean azpEnforce, String trustStore, String trustStorePassword,
+                                               String trustStoreType) throws Exception {
+        RestTemplate restTemplate = JwksTlsSupport.verifiedRestTemplate(trustStore, trustStorePassword, trustStoreType);
         NimbusJwtDecoder decoder = NimbusJwtDecoder.withJwkSetUri(jwkSetUri)
                 .restOperations(restTemplate)
                 .build();

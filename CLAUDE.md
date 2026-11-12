@@ -516,7 +516,7 @@ merge; if a sequential scan is detected, add composite indexes
 
 | Class | Package | Purpose |
 |-------|---------|---------|
-| `SecurityConfig` | `config` | Filter chain — stateless JWT, public paths; trust-all JwtDecoder for self-signed cert; registers `ProfileEnsureFilter` after `BearerTokenAuthenticationFilter` |
+| `SecurityConfig` | `config` | Filter chain — stateless JWT, public paths; JwtDecoder with verified-TLS JWKS fetch (trust-all only in the `dev` profile, optional truststore via `finmates.security.jwks.trust-store*`); registers `ProfileEnsureFilter` after `BearerTokenAuthenticationFilter` |
 | `ProfileEnsureFilter` | `config` | Thin `OncePerRequestFilter` — fires after JWT validation; extracts `user_id` + display name from JWT, delegates to `ProfileInitializationService`; swallows all exceptions (never breaks a request) |
 | `ProfileInitializationService` | `profile` | Service — auto-creates `social.profiles` row for authenticated users on first request; 60s Caffeine cache (50k max) to avoid per-request DB hits; race-safe via `DataIntegrityViolationException` swallow |
 | `JwtAuthConverter` | `config.security` | Keycloak role extraction (realm_access + resource_access) |
@@ -726,12 +726,23 @@ All `/api/internal/**` paths are `permitAll()` in SecurityConfig but gated by `I
 
 If you ever want to silence the SQL log temporarily during a long-running dev session (e.g. profiling a hot path), override locally via `JAVA_TOOL_OPTIONS=-Dlogging.level.org.hibernate.SQL=INFO` — do NOT commit a change to `application-dev.yml` that downgrades the level.
 
+## JWKS TLS verification (JwtDecoder)
+
+The `JwtDecoder` fetches the Keycloak JWKS (`https://auth.finmates.com/realms/finmates/...`). A forged JWKS would let an attacker mint tokens for any user, so TLS is verified on that fetch:
+
+- **Every profile except `dev`** (`@Profile("!dev")` bean `jwtDecoder`): normal TLS verification (certificate chain + host name) using the default JVM truststore. No trust-all anywhere on this path.
+- **Optional custom truststore** for pods that cannot validate the certificate with the default store: `finmates.security.jwks.trust-store` (file path; env `FINMATES_SECURITY_JWKS_TRUST_STORE`), `finmates.security.jwks.trust-store-password` (env `FINMATES_SECURITY_JWKS_TRUST_STORE_PASSWORD`), `finmates.security.jwks.trust-store-type` (default `PKCS12`). When set it replaces the default truststore for the JWKS fetch only; chain and host name are still verified (this is NOT trust-all). A set-but-unreadable path fails the boot on purpose. Unset = default JVM truststore.
+- **`dev` profile only** (`@Profile("dev")` bean `devTrustAllJwtDecoder`): trust-all + no host name check, for a local Keycloak with a self-signed cert; logs a loud `*** INSECURE ***` WARN at startup.
+- Code: `JwksTlsSupport` (RestTemplate factories) + the static `verifiedJwtDecoder(...)` / `trustAllJwtDecoder(...)` factories in the security config; both decoders keep the issuer + timestamp + azp validators. Tests: `JwksTlsVerificationTest` (local HTTPS JWKS server with a self-signed cert: rejected by the default truststore, accepted only via a custom truststore, rejected on host name mismatch).
+- **If a pod cannot validate the cert with the default store, mount a truststore (e.g. a PKCS12 built from the Keycloak certificate) and set the properties above - never re-add trust-all.** Do not reintroduce a trust-all `X509TrustManager` / `HostnameVerifier` outside the `dev` profile.
+- Background: trust-all was added in the initial JWKS decoder commits because Keycloak at `auth.finmates.com` was serving its own self-signed certificate (`CN=auth.finmates.com, CN=keycloak`, SAN `keycloak` + `auth.finmates.com`, valid 2024-2034, the file at `cert/self-signed/finmates.cert` in finmates-crypto/fm-uniswap), which fails PKIX against the default truststore.
+
 ## JWT azp guard
 
 `com.finmates.social.config.security.AzpAllowlistValidator` rejects access tokens whose `azp` (authorized party) claim is not on an allowlist, so tokens minted for third-party / dynamically registered (DCR / MCP) Keycloak clients cannot be replayed against this API. Canonical source and contract: `docs/adr/azp-guard` in the monorepo root (copy verbatim; only the package line differs).
 
 - Properties: `finmates.security.azp.allowed` (comma list, env `FINMATES_SECURITY_AZP_ALLOWED`, default `finmates-app`) and `finmates.security.azp.enforce` (env `FINMATES_SECURITY_AZP_ENFORCE`, default `true`). Defaults live in the base config.
-- Wiring: `SecurityConfig.withTokenValidators(...)` wraps `JwtValidators.createDefaultWithIssuer(issuerUri)` (issuer + timestamps, unchanged) and `AzpAllowlistValidator` in a `DelegatingOAuth2TokenValidator`. The `jwtDecoder()` bean calls it; the trust-all JWKS fetch is untouched. A rejection is an `InvalidBearerTokenException`, i.e. the normal 401 `invalid_token`.
+- Wiring: `SecurityConfig.withTokenValidators(...)` wraps `JwtValidators.createDefaultWithIssuer(issuerUri)` (issuer + timestamps, unchanged) and `AzpAllowlistValidator` in a `DelegatingOAuth2TokenValidator`. The non-dev `jwtDecoder()` and the dev-only `devTrustAllJwtDecoder()` beans both go through it (see "JWKS TLS verification"). A rejection is an `InvalidBearerTokenException`, i.e. the normal 401 `invalid_token`.
 - Missing `azp` is rejected when enforcing. Spring validates any presented Bearer token even on `permitAll` paths, so a disallowed-azp token also gets 401 on public endpoints (e.g. `/api/profiles/*/public`, `/api/discussion/**`, `/api/posts/by-cashtag` when called with a Bearer token).
 - Rollout: first deploy with `FINMATES_SECURITY_AZP_ENFORCE=false` (report-only; logs `azp guard (report-only)` once per distinct azp), watch logs, then remove the override. Keycloak DCR must stay closed until every service enforces.
 - Tests: `AzpAllowlistValidatorTest`, `SecurityConfigAzpWiringTest` (run with `-Dtest=AzpAllowlistValidatorTest,SecurityConfigAzpWiringTest`).
@@ -749,7 +760,7 @@ If you ever want to silence the SQL log temporarily during a long-running dev se
 | `PostResponse.authorUsername` may be null | Posts created before V11 migration have no `author_username` stored. Frontend falls back to `user_${authorId}` display when null. New posts always have it set from JWT `preferred_username`. |
 | `PostResponse` / `CommentResponse` must include moderation fields (`removedAt`, `removalReason`, `removedBy`) | Fixed 2026-04-19. The DTOs previously omitted these three columns even though they exist on `Post` / `Comment` entities (added in V13). Frontend `PostCard.tsx` computes `isRemoved = post.removedAt !== null` — if the field is absent from the JSON, it becomes `undefined` client-side, `undefined !== null` is `true`, and the "removed by moderator" banner renders on EVERY post. Any future response DTO that mirrors an entity with moderation columns MUST surface `removedAt` / `removalReason` / `removedBy` and pass them through in `toResponse()`. |
 | `PublicProfileResponse.userId` added (2026-04-17) | Frontend needs `userId` from public profile to call `GET /api/posts/user/{userId}` in the Posts tab. Added as first field in the record; `ProfileService.buildPublicProfileResponse` passes `targetUserId`. |
-| Self-signed cert on `auth.finmates.com` | `SecurityConfig` defines a custom `@Bean JwtDecoder` with trust-all SSL, same pattern as `fm-admin`. Do NOT remove this override — Spring Boot's auto-configured decoder fails PKIX validation against the self-signed Keycloak cert. |
+| Keycloak cert / JWKS TLS | `SecurityConfig` verifies TLS on the JWKS fetch in every profile except `dev` (default JVM truststore, or `finmates.security.jwks.trust-store*`). If a pod gets `PKIX path building failed`, mount a truststore and set the properties - do NOT re-add trust-all (it is allowed only in the `dev` profile). |
 | `FmSocialApplicationTests.contextLoads` fails in CI | Context-loads test can't connect to DB. Needs test profile with Testcontainers or `@MockBean` JPA. Jenkinsfile uses `-DskipTests` to bypass for now. |
 | `user_id` JWT claim required by all write endpoints | Standard Keycloak tokens lack `user_id`. All authenticated endpoints throw 403 until `finmates-main` adds the claim via a Keycloak token mapper (Prompt 5). |
 | `@CacheEvict` in `ProfileService.updateProfile` | Calls `profileRepository.findById()` directly (not the cached `getProfile()`) to avoid Spring AOP self-invocation. `@CacheEvict` is intercepted by Spring proxy only when called from outside the bean (e.g., from controller). |

@@ -3,6 +3,8 @@ package com.finmates.social.config;
 import com.finmates.social.config.security.AzpAllowlistValidator;
 import com.finmates.social.config.security.JwtAuthConverter;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
+import com.finmates.social.config.security.AzpReportOnlyFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
@@ -158,6 +160,20 @@ public class SecurityConfig {
                 new AzpAllowlistValidator(azpAllowed, azpEnforce));
         decoder.setJwtValidator(validator);
         return decoder;
+    }
+
+    /**
+     * Report-only azp logging (service, method, normalised endpoint, azp - never the token). Order -50 runs
+     * after Spring Security (-100) so the JWT is already authenticated. Uses the same allowlist/enforce
+     * values as the decoder; a no-op when enforcement is on. See CLAUDE.md "JWT azp guard".
+     */
+    @Bean
+    public FilterRegistrationBean<AzpReportOnlyFilter> azpReportOnlyFilter(
+            @Value("${spring.application.name:fm-social}") String serviceName) {
+        FilterRegistrationBean<AzpReportOnlyFilter> registration = new FilterRegistrationBean<>(
+                new AzpReportOnlyFilter(serviceName, azpAllowed, azpEnforce));
+        registration.setOrder(-50);
+        return registration;
     }
 
     @Bean

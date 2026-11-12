@@ -30,6 +30,10 @@ spec:
           env:
             - name: SPRING_PROFILES_ACTIVE
               value: k8s
+            # azp guard: report-only for the first rollout. Flip to "true" (or delete this entry) once the
+            # "azp guard (report-only)" log lines have been reviewed and show no unexpected clients.
+            - name: FINMATES_SECURITY_AZP_ENFORCE
+              value: "false"
             - name: SERVER_PORT
               value: '80'
             - name: INTERNAL_SHARED_SECRET

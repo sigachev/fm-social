@@ -44,7 +44,8 @@ import okhttp3.tls.HeldCertificate;
 /**
  * Proves the non-dev JWKS fetch verifies TLS: a JWKS served over HTTPS with a self-signed
  * certificate is rejected by the default truststore, accepted only when that exact certificate is
- * configured as a custom truststore, and still rejected when the host name does not match.
+ * configured as an additional (pinned) truststore on top of the default JVM anchors, and still rejected when the
+ * host name does not match. A different self-signed certificate stays rejected.
  * The decoder is built through the same static factory the production {@code @Profile("!dev")} bean uses.
  */
 class JwksTlsVerificationTest {
@@ -174,6 +175,33 @@ class JwksTlsVerificationTest {
 
         assertThatThrownBy(() -> decoder.decode(token())).isInstanceOf(JwtException.class);
         assertThat(server.getRequestCount()).isZero();
+    }
+
+    @Test
+    void mergedTrustKeepsTheJvmDefaultAnchorsAndAddsTheCustomCertificate() throws Exception {
+        HeldCertificate pinned = selfSigned("127.0.0.1");
+        KeyStore custom = KeyStore.getInstance("PKCS12");
+        custom.load(null, null);
+        custom.setCertificateEntry("keycloak", pinned.certificate());
+
+        KeyStore merged = JwksTlsSupport.mergedTrustStore(custom);
+
+        javax.net.ssl.TrustManagerFactory def =
+                javax.net.ssl.TrustManagerFactory.getInstance(javax.net.ssl.TrustManagerFactory.getDefaultAlgorithm());
+        def.init((KeyStore) null);
+        java.util.Set<java.security.cert.X509Certificate> defaults = new java.util.HashSet<>();
+        for (javax.net.ssl.TrustManager tm : def.getTrustManagers()) {
+            if (tm instanceof javax.net.ssl.X509TrustManager x509) {
+                defaults.addAll(java.util.Arrays.asList(x509.getAcceptedIssuers()));
+            }
+        }
+        assertThat(defaults).as("JVM default trust anchors").isNotEmpty();
+        assertThat(merged.size()).as("not a single-cert store").isGreaterThan(defaults.size() - 1);
+        for (java.security.cert.X509Certificate anchor : defaults) {
+            assertThat(merged.getCertificateAlias(anchor)).as("default anchor kept: %s", anchor.getSubjectX500Principal())
+                    .isNotNull();
+        }
+        assertThat(merged.getCertificateAlias(pinned.certificate())).as("pinned cert added").isNotNull();
     }
 
     @Test

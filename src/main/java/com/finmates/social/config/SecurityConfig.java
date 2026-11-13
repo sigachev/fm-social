@@ -80,9 +80,9 @@ public class SecurityConfig {
     private boolean azpEnforce;
 
     /**
-     * Optional custom truststore for the JWKS fetch (pods that cannot validate the Keycloak
-     * certificate with the default JVM truststore). Unset = default JVM truststore. The truststore
-     * is used with full chain + host name verification; this is NOT trust-all.
+     * Optional ADDITIONAL truststore for the JWKS fetch (escape hatch; in-cluster the image's cacerts already
+     * contains the pinned Keycloak cert). Unset = default JVM truststore. When set, its certificates are added to
+     * the default JVM trust anchors; full chain + host name verification; this is NOT trust-all.
      */
     @Value("${finmates.security.jwks.trust-store:}")
     private String jwksTrustStore;
@@ -109,7 +109,7 @@ public class SecurityConfig {
 
     /**
      * JwtDecoder for every profile EXCEPT {@code dev}: the JWKS is fetched with normal TLS
-     * verification (default JVM truststore, or the optional {@code finmates.security.jwks.trust-store}),
+     * verification (default JVM truststore, plus the certificates of the optional {@code finmates.security.jwks.trust-store}),
      * including host name verification. Never trust-all here.
      */
     @Bean

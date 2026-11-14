@@ -835,3 +835,7 @@ Cross-session memory via the `claude-mem` MCP plugin.
   staging before merge. Hand-verify query correctness in same
   staging session. Cache-hit test and @DataJpaTest deferred as
   follow-up cleanup tasks.
+
+## Internal-gate path matching (2026-11-14)
+
+`InternalSecretFilter` matches the DECODED, NORMALISED path (`config/RequestPaths`), never `request.getRequestURI()` (raw). The old `startsWith("/api/internal/")` let `/api/%69nternal/comments/{id}/remove` (and the other `/api/internal/**` moderation controllers) through without `X-Internal-Secret`. Use `RequestPaths.isUnder(request, "api", "internal")` for any security decision. Tests: `InternalSecretPathBypassTest`, `RequestPathsTest`.

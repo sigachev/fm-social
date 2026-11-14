@@ -8,10 +8,7 @@ pipeline {
         K8S_NAMESPACE            = "dev"
         KUBECONFIG_CREDENTIALS_ID = 'k8s-creds'
 
-        NEXUS_CREDENTIALS_ID = "nexus-user-credentials"
         REPOSITORY_URI       = "10.0.0.70:8090"
-        NEXUS_USER           = "jenkins"
-        NEXUS_PWD            = "int68593"
     }
 
     stages {
@@ -52,10 +49,15 @@ pipeline {
         stage('Upload to Nexus') {
             steps {
                 script {
-                    sh "docker login -u ${NEXUS_USER} -p ${NEXUS_PWD} ${REPOSITORY_URI}"
-                    sh "docker push ${REPOSITORY_URI}/${DOCKER_IMAGE}"
-                    sh "docker rmi ${DOCKER_IMAGE}"
-                    sh "docker logout ${REPOSITORY_URI}"
+                    withCredentials([usernamePassword(credentialsId: 'nexus-jenkins', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PWD')]) {
+                        try {
+                            sh 'echo "$NEXUS_PWD" | docker login -u "$NEXUS_USER" --password-stdin "$REPOSITORY_URI"'
+                            sh "docker push ${REPOSITORY_URI}/${DOCKER_IMAGE}"
+                            sh "docker rmi ${DOCKER_IMAGE}"
+                        } finally {
+                            sh 'docker logout "$REPOSITORY_URI"'
+                        }
+                    }
                 }
             }
         }

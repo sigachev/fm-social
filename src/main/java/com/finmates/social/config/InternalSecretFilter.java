@@ -35,7 +35,8 @@ public class InternalSecretFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
-        if (!request.getRequestURI().startsWith("/api/internal/")) {
+        // Decoded, normalised path (RequestPaths): the raw URI would miss /api/%69nternal/.. and the bare /api/internal.
+        if (!RequestPaths.isUnder(request, "api", "internal")) {
             filterChain.doFilter(request, response);
             return;
         }

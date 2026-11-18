@@ -1,5 +1,5 @@
 package com.finmates.social.profile;
 
 public enum AllowMessages {
-    EVERYONE, FOLLOWERS, NOONE
+    EVERYONE, MATES, NOONE
 }

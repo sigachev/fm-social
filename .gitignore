@@ -63,3 +63,8 @@ spring.log
 
 # Build artifacts
 graphify-out/
+
+# JVM crash logs and graphify caches (tidy-up 2026-11-18)
+hs_err_pid*.log
+replay_pid*.log
+src/**/graphify-out/

@@ -58,7 +58,9 @@ pipeline {
                         try {
                             sh 'echo "$NEXUS_PWD" | docker login -u "$NEXUS_USER" --password-stdin "$REPOSITORY_URI"'
                             sh "docker push ${REPOSITORY_URI}/${DOCKER_IMAGE}:${IMAGE_TAG}"
-                            sh "docker push ${REPOSITORY_URI}/${DOCKER_IMAGE}:latest"   // kept for anything still pulling :latest
+                            // :latest is a convenience copy; deploys use the unique tag. Overwriting it needs the Nexus
+                            // 'edit' privilege, so a refusal here must not fail the build.
+                            sh "docker push ${REPOSITORY_URI}/${DOCKER_IMAGE}:latest || echo 'WARNING: could not update :latest (Nexus edit privilege); deploy uses the unique tag'"
                             sh "docker rmi ${DOCKER_IMAGE}:latest ${REPOSITORY_URI}/${DOCKER_IMAGE}:${IMAGE_TAG} ${REPOSITORY_URI}/${DOCKER_IMAGE}:latest || true"
                         } finally {
                             sh 'docker logout "$REPOSITORY_URI"'

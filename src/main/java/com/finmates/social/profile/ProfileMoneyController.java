@@ -14,9 +14,11 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.time.Duration;
@@ -116,7 +118,11 @@ public class ProfileMoneyController {
         if (summary.isEmpty() || !summary.get().isActive() || summary.get().userId() == null) {
             return null;
         }
-        Long userId = summary.get().userId();
+        return viewFor(viewerId, summary.get().userId());
+    }
+
+    /** Same as {@link #view(String)} for a known user id; viewerId null = anonymous. */
+    private View viewFor(Long viewerId, Long userId) {
         Profile p = profiles.findById(userId).orElse(null);
         if (p == null) return null;
 
@@ -162,6 +168,148 @@ public class ProfileMoneyController {
                 })
                 .block();
         return detail == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(detail);
+    }
+
+    // ── mates' money (dashboard) ─────────────────────────────────────────────────
+
+    /** One mate (or the viewer) on the dashboard; every money field is null when that mate hides it. */
+    public record MateMoney(Long userId, String username, String displayName, boolean me, Access access,
+                            String status, Integer walletCount, java.math.BigDecimal netWorthUsd,
+                            java.math.BigDecimal return30dPct, java.math.BigDecimal return12mPct,
+                            JsonNode topHolding, JsonNode lastTrade, String asOf) {}
+
+    public record MatesMoneyResponse(MateMoney me, java.util.List<MateMoney> mates, int total, boolean truncated) {}
+
+    private static final int MATES_LIMIT = 100;
+
+    /**
+     * The viewer and their mates (mutual active follows), each filtered by that mate's own privacy
+     * settings exactly as on their profile: hidden portfolio -> no money at all, hidden P&L -> no
+     * returns, hidden positions -> no top holding, hidden trades -> no last trade. Ranking mates by
+     * return uses only what each mate already shows the viewer; the public leaderboard opt-in is not
+     * needed here. COMPUTING summaries come back with status COMPUTING; poll until they settle.
+     */
+    @GetMapping("/me/mates-money")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "Dashboard: the viewer's and their mates' money, each mate's privacy applied")
+    public MatesMoneyResponse matesMoney(@RequestParam(defaultValue = "true") boolean withLastTrade) {
+        Long viewerId = authenticatedUser.currentUserId();
+        var page = follows.findActiveFollowingMatesOnly(viewerId, org.springframework.data.domain.PageRequest.of(0, MATES_LIMIT));
+        java.util.List<Long> ids = page.getContent().stream().map(f -> f.getFollowedId()).distinct().toList();
+
+        java.util.List<MateMoney> all = Flux.fromIterable(java.util.stream.Stream.concat(java.util.stream.Stream.of(viewerId), ids.stream()).toList())
+                .flatMapSequential(id -> Mono.fromCallable(() -> java.util.Optional.ofNullable(viewFor(viewerId, id)))
+                        .subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic())
+                        .flatMap(o -> o.map(v -> mateMoney(v, withLastTrade)).orElse(Mono.empty())), 8)
+                .collectList()
+                .block(Duration.ofSeconds(20));
+        if (all == null) all = java.util.List.of();
+        MateMoney me = all.stream().filter(MateMoney::me).findFirst().orElse(null);
+        java.util.List<MateMoney> mates = all.stream().filter(m -> !m.me()).toList();
+        return new MatesMoneyResponse(me, mates, (int) page.getTotalElements(), page.getTotalElements() > MATES_LIMIT);
+    }
+
+    private Mono<MateMoney> mateMoney(View v, boolean withLastTrade) {
+        String username = users.getByUserId(v.userId()).map(UserLookupCache.UserSummary::username).orElse(null);
+        String name = displayName(v.profile(), username);
+        Access a = v.access();
+        if (!a.portfolio()) {
+            return Mono.just(new MateMoney(v.userId(), username, name, v.owner(), a, "HIDDEN", null, null, null, null, null, null, null));
+        }
+        Mono<java.util.Optional<JsonNode>> sumM = get(crypto, "/api/internal/users/{id}/public-summary", v.userId(), "summary")
+                .map(java.util.Optional::of).defaultIfEmpty(java.util.Optional.empty());
+        Mono<java.util.Optional<JsonNode>> trM = withLastTrade && a.trades()
+                ? get(uniswap, "/api/internal/users/{id}/trades?limit=1", v.userId(), "trades").map(java.util.Optional::of).defaultIfEmpty(java.util.Optional.empty())
+                : Mono.just(java.util.Optional.empty());
+        return Mono.zip(sumM, trM).map(t -> {
+            JsonNode s = t.getT1().orElse(null);
+            JsonNode tr = t.getT2().map(n -> n.path("trades").path(0)).filter(n -> !n.isMissingNode()).orElse(null);
+            if (s == null) {
+                return new MateMoney(v.userId(), username, name, v.owner(), a, "UNAVAILABLE", null, null, null, null, null, tr, null);
+            }
+            JsonNode top = a.positions() ? s.path("topHoldings").path(0) : null;
+            return new MateMoney(v.userId(), username, name, v.owner(), a,
+                    s.path("status").asText("UNAVAILABLE"),
+                    s.path("wallets").isArray() ? s.path("wallets").size() : null,
+                    dec(s.path("netWorthUsd")),
+                    a.pnl() ? dec(s.path("return30dPct")) : null,
+                    a.pnl() ? dec(s.path("return12mPct")) : null,
+                    top == null || top.isMissingNode() ? null : top,
+                    tr,
+                    s.path("asOf").isTextual() ? s.path("asOf").asText() : null);
+        });
+    }
+
+    public record MateTrade(Long userId, String username, String displayName, JsonNode trade) {}
+    public record MateBuying(String symbol, int mates, java.math.BigDecimal usd, java.util.List<Long> userIds) {}
+    public record MatesActivityResponse(java.util.List<MateTrade> trades, java.util.List<MateBuying> buying, int buyingWindowDays) {}
+
+    /**
+     * Dashboard: mates' recent on-chain swaps from their verified wallets (only mates who show their
+     * trades to the viewer), newest first, plus what most mates bought in the last 7 days.
+     */
+    @GetMapping("/me/mates-activity")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "Dashboard: mates' recent swaps and what they are buying, each mate's privacy applied")
+    public MatesActivityResponse matesActivity(@RequestParam(defaultValue = "20") int limit) {
+        Long viewerId = authenticatedUser.currentUserId();
+        int max = Math.max(1, Math.min(limit, 50));
+        var page = follows.findActiveFollowingMatesOnly(viewerId, org.springframework.data.domain.PageRequest.of(0, MATES_LIMIT));
+        java.util.List<Long> ids = page.getContent().stream().map(f -> f.getFollowedId()).distinct().toList();
+
+        java.util.List<MateTrade> trades = Flux.fromIterable(ids)
+                .flatMap(id -> Mono.fromCallable(() -> java.util.Optional.ofNullable(viewFor(viewerId, id)))
+                        .subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic())
+                        .flatMapMany(o -> {
+                            View v = o.orElse(null);
+                            if (v == null || !v.access().trades()) return Flux.empty();
+                            String username = users.getByUserId(id).map(UserLookupCache.UserSummary::username).orElse(null);
+                            String name = displayName(v.profile(), username);
+                            return get(uniswap, "/api/internal/users/{id}/trades?limit=20", id, "trades")
+                                    .flatMapMany(n -> Flux.fromIterable(n.path("trades")))
+                                    .map(t -> new MateTrade(id, username, name, t));
+                        }), 8)
+                .collectList()
+                .block(Duration.ofSeconds(20));
+        if (trades == null) trades = java.util.List.of();
+
+        java.util.List<MateTrade> sorted = new java.util.ArrayList<>(trades);
+        sorted.sort(java.util.Comparator.comparing((MateTrade t) -> t.trade().path("timestamp").asText("")).reversed());
+
+        java.time.Instant since = java.time.Instant.now().minus(Duration.ofDays(7));
+        java.util.Map<String, java.util.Set<Long>> who = new java.util.HashMap<>();
+        java.util.Map<String, java.math.BigDecimal> usd = new java.util.HashMap<>();
+        for (MateTrade t : sorted) {
+            JsonNode tr = t.trade();
+            java.time.Instant at;
+            try { at = java.time.Instant.parse(tr.path("timestamp").asText()); } catch (Exception e) { continue; }
+            if (at.isBefore(since)) continue;
+            String sym = tr.path("bought").path("symbol").asText("").toUpperCase(java.util.Locale.ROOT);
+            if (sym.isEmpty() || STABLES.contains(sym)) continue;      // buying a stablecoin is selling something else
+            who.computeIfAbsent(sym, k -> new java.util.LinkedHashSet<>()).add(t.userId());
+            if (tr.path("amountUsd").isNumber()) usd.merge(sym, tr.path("amountUsd").decimalValue(), java.math.BigDecimal::add);
+        }
+        java.util.List<MateBuying> buying = who.entrySet().stream()
+                .map(e -> new MateBuying(e.getKey(), e.getValue().size(), usd.getOrDefault(e.getKey(), java.math.BigDecimal.ZERO),
+                        java.util.List.copyOf(e.getValue())))
+                .sorted(java.util.Comparator.comparingInt(MateBuying::mates).reversed()
+                        .thenComparing(MateBuying::usd, java.util.Comparator.reverseOrder()))
+                .limit(6).toList();
+        return new MatesActivityResponse(sorted.stream().limit(max).toList(), buying, 7);
+    }
+
+    private static final java.util.Set<String> STABLES = java.util.Set.of(
+            "USDC", "USDT", "DAI", "USDC.E", "USDBC", "USDE", "FRAX", "LUSD", "PYUSD", "USDS", "GHO", "TUSD", "FDUSD");
+
+    private static java.math.BigDecimal dec(JsonNode n) {
+        return n == null || n.isNull() || n.isMissingNode() || !n.isNumber() ? null : n.decimalValue();
+    }
+
+    private static String displayName(Profile p, String username) {
+        if (p.getDisplayName() != null && !p.getDisplayName().isBlank()) return p.getDisplayName().trim();
+        String full = ((p.getFirstName() == null ? "" : p.getFirstName()) + " " + (p.getLastName() == null ? "" : p.getLastName())).trim();
+        if (p.isShowRealName() && !full.isEmpty()) return full;
+        return username;
     }
 
     private Mono<JsonNode> get(WebClient client, String uri, Long userId, String what) {

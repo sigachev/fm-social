@@ -338,6 +338,22 @@ public class ProfileService {
         boolean isBlocked = viewerId != null
                 && blockRepository.existsBlockInEitherDirection(viewerId, targetUserId);
 
+        boolean visitor = viewerId != null && !viewerId.equals(targetUserId);
+        boolean followsYou = visitor
+                && followRepository.existsByFollowerIdAndFollowedIdAndStatus(targetUserId, viewerId, FollowStatus.ACTIVE);
+        // Mates of you both: only people who are already the viewer's mates, so nothing new about
+        // strangers leaks; skipped when the viewer can't see a private account's connections.
+        java.util.List<Long> mutual = java.util.List.of();
+        if (visitor && !(profile.isPrivate() && !isFollowing)) {
+            java.util.Set<Long> mine = followRepository.findAllMateIds(viewerId);
+            if (!mine.isEmpty()) {
+                java.util.Set<Long> theirs = followRepository.findAllMateIds(targetUserId);
+                mutual = mine.stream().filter(theirs::contains).filter(id -> !id.equals(targetUserId)).sorted().toList();
+            }
+        }
+        java.util.List<com.finmates.social.profile.dto.ProfileSummaryResponse> mutualShown =
+                mutual.isEmpty() ? java.util.List.of() : getBatchSummaries(mutual.subList(0, Math.min(3, mutual.size())));
+
         String avatarUrl = resolveAvatarUrl(profile);
         String coverUrl = profile.getCoverKey() != null
                 ? s3Service.createPresignedGet(profile.getCoverKey()) : null;
@@ -376,7 +392,13 @@ public class ProfileService {
                 portfolio,
                 userSummary.emailVerified(),
                 isFollowing,
-                isBlocked
+                isBlocked,
+                profile.getCreatedAt(),
+                followsYou,
+                isFollowing && followsYou,
+                followRepository.countMates(targetUserId),
+                mutual.size(),
+                mutualShown
         ));
     }
 

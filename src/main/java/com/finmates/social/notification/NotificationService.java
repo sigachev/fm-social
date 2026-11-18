@@ -34,7 +34,8 @@ public class NotificationService {
             "PEOPLES_SIGNALS", java.util.Set.of("SIGNAL_POSTED", "SIGNAL_HIT", "SIGNAL_STOPPED", "SIGNAL_BACKED"),
             "MY_SIGNALS", java.util.Set.of("MY_SIGNAL_HIT", "MY_SIGNAL_STOPPED", "MY_SIGNAL_EXPIRED"),
             "MESSAGES", java.util.Set.of("MESSAGE", "MESSAGE_REQUEST"),
-            "PRICE_ALERTS", java.util.Set.of("PRICE_ALERT"));
+            "PRICE_ALERTS", java.util.Set.of("PRICE_ALERT"),
+            "LIQUIDITY", java.util.Set.of("LP_NEAR_EDGE", "LP_OUT_OF_RANGE", "LP_BACK_IN_RANGE"));
 
     /** Which category a notification belongs to; the author's own signal results are MY_SIGNALS. */
     static String categoryOf(String type, boolean aboutSelf) {
@@ -69,7 +70,7 @@ public class NotificationService {
     // ── settings ──
     public java.util.Map<String, Boolean> settings(Long userId) {
         java.util.Map<String, Boolean> out = new java.util.LinkedHashMap<>();
-        for (String c : List.of("FOLLOWS", "PEOPLES_SIGNALS", "MY_SIGNALS", "MESSAGES", "PRICE_ALERTS")) out.put(c, true);
+        for (String c : List.of("FOLLOWS", "PEOPLES_SIGNALS", "MY_SIGNALS", "MESSAGES", "PRICE_ALERTS", "LIQUIDITY")) out.put(c, true);
         jdbc.query("SELECT category, enabled FROM notification_settings WHERE user_id = ?",
                 rs -> { if (out.containsKey(rs.getString(1))) out.put(rs.getString(1), rs.getBoolean(2)); }, userId);
         return out;

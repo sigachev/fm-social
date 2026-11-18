@@ -68,34 +68,12 @@ public class ProfileMoneyController {
     @PreAuthorize("permitAll()")
     @Operation(summary = "Public money summary of a profile (verified wallets), filtered by the owner's privacy settings")
     public ResponseEntity<MoneyResponse> money(@PathVariable String username) {
-        Long viewerId = null;
-        try { viewerId = authenticatedUser.currentUserId(); } catch (Exception ignored) { /* anonymous */ }
-
-        var summary = users.getByUsername(username);
-        if (summary.isEmpty() || !summary.get().isActive() || summary.get().userId() == null) {
-            return ResponseEntity.notFound().build();
-        }
-        Long userId = summary.get().userId();
-        Profile p = profiles.findById(userId).orElse(null);
-        if (p == null) return ResponseEntity.notFound().build();
-
-        boolean owner = userId.equals(viewerId);
-        if (!owner) {
-            if (p.getProfileVisibility() == ProfileVisibility.PRIVATE) return ResponseEntity.notFound().build();
-            if (viewerId != null && blocks.existsBlockInEitherDirection(viewerId, userId)) return ResponseEntity.notFound().build();
-        }
-
-        boolean follower = viewerId != null
-                && follows.existsByFollowerIdAndFollowedIdAndStatus(viewerId, userId, FollowStatus.ACTIVE);
-        boolean portfolio = owner || switch (p.getPortfolioVisibility()) {
-            case PUBLIC -> true;
-            case FOLLOWERS -> follower;
-            case PRIVATE -> false;
-        };
-        Access access = new Access(portfolio,
-                portfolio && (owner || p.isShowPnl()),
-                portfolio && (owner || p.isShowPositions()),
-                portfolio && (owner || (p.isShowTradingActivity() && p.isShowTradeHistory())));
+        View v = view(username);
+        if (v == null) return ResponseEntity.notFound().build();
+        Long userId = v.userId();
+        boolean owner = v.owner();
+        Profile p = v.profile();
+        Access access = v.access();
 
         java.util.List<String> hidden = new java.util.ArrayList<>();
         if (!access.portfolio()) hidden.add(p.getPortfolioVisibility() == PortfolioVisibility.FOLLOWERS ? "portfolio:followers" : "portfolio");
@@ -124,6 +102,66 @@ public class ProfileMoneyController {
         }
         return ResponseEntity.ok(new MoneyResponse(userId, owner, access, hidden, sum,
                 posM.blockOptional().orElse(null), trM.blockOptional().orElse(null)));
+    }
+
+    /** Who is looking at whose profile, and what the owner's privacy settings let them see. */
+    private record View(Long userId, boolean owner, Profile profile, Access access) {}
+
+    /** null when the profile must look like it doesn't exist (unknown, inactive, private or blocked). */
+    private View view(String username) {
+        Long viewerId = null;
+        try { viewerId = authenticatedUser.currentUserId(); } catch (Exception ignored) { /* anonymous */ }
+
+        var summary = users.getByUsername(username);
+        if (summary.isEmpty() || !summary.get().isActive() || summary.get().userId() == null) {
+            return null;
+        }
+        Long userId = summary.get().userId();
+        Profile p = profiles.findById(userId).orElse(null);
+        if (p == null) return null;
+
+        boolean owner = userId.equals(viewerId);
+        if (!owner) {
+            if (p.getProfileVisibility() == ProfileVisibility.PRIVATE) return null;
+            if (viewerId != null && blocks.existsBlockInEitherDirection(viewerId, userId)) return null;
+        }
+
+        boolean follower = viewerId != null
+                && follows.existsByFollowerIdAndFollowedIdAndStatus(viewerId, userId, FollowStatus.ACTIVE);
+        boolean portfolio = owner || switch (p.getPortfolioVisibility()) {
+            case PUBLIC -> true;
+            case FOLLOWERS -> follower;
+            case PRIVATE -> false;
+        };
+        Access access = new Access(portfolio,
+                portfolio && (owner || p.isShowPnl()),
+                portfolio && (owner || p.isShowPositions()),
+                portfolio && (owner || (p.isShowTradingActivity() && p.isShowTradeHistory())));
+        return new View(userId, owner, p, access);
+    }
+
+    /**
+     * One Uniswap position in depth, for a profile visitor. Needs both positions and returns to be
+     * visible (the page is mostly value and PnL), and the position must sit in one of the profile
+     * owner's verified wallets (fm-uniswap checks that). Anything else is a 404.
+     */
+    @GetMapping("/{username}/positions/{chain}/{tokenId}")
+    @PreAuthorize("permitAll()")
+    @Operation(summary = "One Uniswap position of a profile (verified wallets), if the owner's privacy settings allow it")
+    public ResponseEntity<JsonNode> position(@PathVariable String username, @PathVariable String chain,
+                                             @PathVariable String tokenId) {
+        if (!chain.matches("[a-z0-9-]{1,32}") || !tokenId.matches("\\d{1,78}")) return ResponseEntity.notFound().build();
+        View v = view(username);
+        if (v == null || !v.access().positions() || !v.access().pnl()) return ResponseEntity.notFound().build();
+        JsonNode detail = uniswap.get().uri("/api/internal/users/{id}/positions/{chain}/{tokenId}", v.userId(), chain, tokenId)
+                .retrieve().bodyToMono(JsonNode.class)
+                .timeout(Duration.ofSeconds(30))
+                .onErrorResume(e -> {
+                    log.info("event=profile_position_unavailable user={} chain={} token={} error={}", v.userId(), chain, tokenId, e.toString());
+                    return Mono.empty();
+                })
+                .block();
+        return detail == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(detail);
     }
 
     private Mono<JsonNode> get(WebClient client, String uri, Long userId, String what) {

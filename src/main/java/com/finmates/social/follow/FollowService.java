@@ -5,6 +5,7 @@ import com.finmates.social.common.PageResponse;
 import com.finmates.social.common.exception.ForbiddenActionException;
 import com.finmates.social.common.exception.ResourceNotFoundException;
 import com.finmates.social.feed.FeedService;
+import com.finmates.social.notification.NotificationService;
 import com.finmates.social.follow.dto.FollowOutcome;
 import com.finmates.social.follow.dto.FollowResponse;
 import com.finmates.social.follow.dto.FollowStatsResponse;
@@ -29,15 +30,29 @@ public class FollowService {
     private final BlockRepository blockRepository;
     private final ProfileRepository profileRepository;
     private final FeedService feedService;
+    private final NotificationService notifications;
 
     public FollowService(FollowRepository followRepository,
                          BlockRepository blockRepository,
                          ProfileRepository profileRepository,
-                         FeedService feedService) {
+                         FeedService feedService,
+                         NotificationService notifications) {
         this.followRepository = followRepository;
         this.blockRepository = blockRepository;
         this.profileRepository = profileRepository;
         this.feedService = feedService;
+        this.notifications = notifications;
+    }
+
+    /** Bell notification for the person being followed (or asked to approve a request). */
+    private void notifyFollowed(Long followerId, Long followedId, boolean request) {
+        String name = notifications.nameOf(followerId);
+        String username = notifications.usernameOf(followerId);
+        String link = username != null ? "/u/" + username : (request ? "/connections" : null);
+        boolean mutual = !request && followRepository.existsByFollowerIdAndFollowedIdAndStatus(followedId, followerId, FollowStatus.ACTIVE);
+        notifications.notify(followedId, request ? "FOLLOW_REQUEST" : mutual ? "NEW_MATE" : "NEW_FOLLOWER", followerId,
+                request ? name + " wants to follow you" : mutual ? name + " followed you back. You're mates now" : name + " started following you",
+                null, request ? "/connections" : link);
     }
 
     /**
@@ -87,6 +102,7 @@ public class FollowService {
         if (initialStatus == FollowStatus.ACTIVE) {
             feedService.onFollowActivated(followerId, followedId);
         }
+        notifyFollowed(followerId, followedId, initialStatus != FollowStatus.ACTIVE);
         return new FollowOutcome(true, toResponse(saved));
     }
 
@@ -123,6 +139,8 @@ public class FollowService {
         row.setStatus(FollowStatus.ACTIVE);
         Follow saved = followRepository.save(row);
         feedService.onFollowActivated(followerId, followeeId);
+        notifications.notify(followerId, "FOLLOW_ACCEPTED", followeeId, notifications.nameOf(followeeId) + " accepted your follow request", null,
+                notifications.usernameOf(followeeId) != null ? "/u/" + notifications.usernameOf(followeeId) : null);
         return toResponse(saved);
     }
 

@@ -19,8 +19,10 @@ public class NotificationController {
 
     private final NotificationService service;
     private final AuthenticatedUser me;
+    private final NotificationStream live;
 
-    public NotificationController(NotificationService service, AuthenticatedUser me) {
+    public NotificationController(NotificationService service, AuthenticatedUser me, NotificationStream live) {
+        this.live = live;
         this.service = service;
         this.me = me;
     }
@@ -30,6 +32,16 @@ public class NotificationController {
     public List<NotificationService.Item> list(@RequestParam(defaultValue = "20") int limit,
                                                @RequestParam(required = false) Long before) {
         return service.list(me.currentUserId(), limit, before);
+    }
+
+    /** Server-sent events: a "notification" event for each new one, while the tab is open. */
+    @GetMapping(value = "/stream", produces = org.springframework.http.MediaType.TEXT_EVENT_STREAM_VALUE)
+    @Operation(summary = "Live stream of new notifications (server-sent events)")
+    public org.springframework.web.servlet.mvc.method.annotation.SseEmitter stream(jakarta.servlet.http.HttpServletResponse res) {
+        // Tell nginx-style proxies not to buffer the stream.
+        res.setHeader("X-Accel-Buffering", "no");
+        res.setHeader("Cache-Control", "no-cache");
+        return live.open(me.currentUserId());
     }
 
     @GetMapping("/unread-count")

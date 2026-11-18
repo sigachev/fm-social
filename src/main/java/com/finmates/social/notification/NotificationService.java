@@ -28,6 +28,21 @@ public class NotificationService {
 
     private static final int MAX_FANOUT = 5_000;
 
+    /** Settings categories, each covering some notification types. */
+    public static final java.util.Map<String, java.util.Set<String>> CATEGORIES = java.util.Map.of(
+            "FOLLOWS", java.util.Set.of("NEW_FOLLOWER", "NEW_MATE", "FOLLOW_REQUEST", "FOLLOW_ACCEPTED"),
+            "PEOPLES_SIGNALS", java.util.Set.of("SIGNAL_POSTED", "SIGNAL_HIT", "SIGNAL_STOPPED", "SIGNAL_BACKED"),
+            "MY_SIGNALS", java.util.Set.of("MY_SIGNAL_HIT", "MY_SIGNAL_STOPPED", "MY_SIGNAL_EXPIRED"),
+            "MESSAGES", java.util.Set.of("MESSAGE", "MESSAGE_REQUEST"));
+
+    /** Which category a notification belongs to; the author's own signal results are MY_SIGNALS. */
+    static String categoryOf(String type, boolean aboutSelf) {
+        if (type == null) return null;
+        if (aboutSelf && type.startsWith("SIGNAL_")) return "MY_SIGNALS";
+        for (var e : CATEGORIES.entrySet()) if (e.getValue().contains(type)) return e.getKey();
+        return null;
+    }
+
     private final JdbcTemplate jdbc;
     private final FollowRepository follows;
     private final UserLookupCache users;
@@ -42,13 +57,54 @@ public class NotificationService {
 
     public void notify(Long userId, String type, Long actorId, String title, String body, String link) {
         if (userId == null || Objects.equals(userId, actorId)) return;
+        // A notification with no actor about a signal is the author's own result (MY_SIGNALS).
+        if (!enabled(userId, categoryOf(type, actorId == null))) return;
         insert(List.of(userId), type, actorId, title, body, link);
+    }
+
+    // ── settings ──
+    public java.util.Map<String, Boolean> settings(Long userId) {
+        java.util.Map<String, Boolean> out = new java.util.LinkedHashMap<>();
+        for (String c : List.of("FOLLOWS", "PEOPLES_SIGNALS", "MY_SIGNALS", "MESSAGES")) out.put(c, true);
+        jdbc.query("SELECT category, enabled FROM notification_settings WHERE user_id = ?",
+                rs -> { if (out.containsKey(rs.getString(1))) out.put(rs.getString(1), rs.getBoolean(2)); }, userId);
+        return out;
+    }
+
+    public java.util.Map<String, Boolean> updateSettings(Long userId, java.util.Map<String, Boolean> changes) {
+        changes.forEach((c, on) -> {
+            if (!CATEGORIES.containsKey(c) || on == null) return;
+            jdbc.update("INSERT INTO notification_settings (user_id, category, enabled) VALUES (?, ?, ?) "
+                    + "ON CONFLICT (user_id, category) DO UPDATE SET enabled = EXCLUDED.enabled", userId, c, on);
+        });
+        return settings(userId);
+    }
+
+    private boolean enabled(Long userId, String category) {
+        if (category == null) return true;
+        try {
+            List<Boolean> r = jdbc.queryForList("SELECT enabled FROM notification_settings WHERE user_id = ? AND category = ?", Boolean.class, userId, category);
+            return r.isEmpty() || Boolean.TRUE.equals(r.get(0));
+        } catch (Exception e) {
+            return true;
+        }
     }
 
     /** Every ACTIVE follower of {@code actorId} (the actor themself excluded). Returns how many got it. */
     public int notifyFollowers(Long actorId, String type, String title, String body, String link) {
         List<Long> ids = follows.findAllFollowerIds(actorId).stream()
                 .filter(id -> !Objects.equals(id, actorId)).distinct().limit(MAX_FANOUT).toList();
+        String category = categoryOf(type, false);
+        if (category != null && !ids.isEmpty()) {
+            // Drop followers who switched this category off.
+            String in = String.join(",", java.util.Collections.nCopies(ids.size(), "?"));
+            List<Object> args = new ArrayList<>(ids);
+            args.add(category);
+            java.util.Set<Long> off = new java.util.HashSet<>(jdbc.queryForList(
+                    "SELECT user_id FROM notification_settings WHERE user_id IN (" + in + ") AND category = ? AND enabled = FALSE",
+                    Long.class, args.toArray()));
+            if (!off.isEmpty()) ids = ids.stream().filter(id -> !off.contains(id)).toList();
+        }
         insert(ids, type, actorId, title, body, link);
         return ids.size();
     }

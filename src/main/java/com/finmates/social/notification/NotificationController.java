@@ -42,6 +42,18 @@ public class NotificationController {
         return Map.of("updated", service.markAllRead(me.currentUserId()));
     }
 
+    @GetMapping("/settings")
+    @Operation(summary = "Which notification categories are on: FOLLOWS, PEOPLES_SIGNALS, MY_SIGNALS, MESSAGES")
+    public Map<String, Boolean> settings() {
+        return service.settings(me.currentUserId());
+    }
+
+    @PutMapping("/settings")
+    @Operation(summary = "Turn notification categories on or off (only the ones sent change)")
+    public Map<String, Boolean> updateSettings(@RequestBody Map<String, Boolean> changes) {
+        return service.updateSettings(me.currentUserId(), changes == null ? Map.of() : changes);
+    }
+
     @PostMapping("/{id}/read")
     public ResponseEntity<Void> read(@PathVariable Long id) {
         service.markRead(me.currentUserId(), id);

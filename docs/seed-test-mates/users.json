@@ -1,0 +1,249 @@
+{
+  "batch": "test-mates-2026-11",
+  "mate_of_username": "sigachev",
+  "mate_of_user_id": 1,
+  "users": [
+    {
+      "username": "priya.raman",
+      "firstName": "Priya",
+      "lastName": "Raman",
+      "email": "priya.raman@finmates.com",
+      "displayName": "Priya Raman",
+      "location": "Toronto, Canada",
+      "timezone": "America/Toronto",
+      "bio": "Swing trader on ETH and L2 tokens. I read on-chain flows before charts.",
+      "style": "swing",
+      "isPrivate": false,
+      "showPnl": true,
+      "watchWallets": [
+        {
+          "address": "0x247e5ecf61b375a1583065beca70cc2c92ba50b7",
+          "label": "ETH/USDC LP",
+          "chainId": 42161
+        },
+        {
+          "address": "0x07f54bdfbf3c5220027badcdae9fed73a2209b27",
+          "label": "Mainnet BTC/gold",
+          "chainId": 1
+        }
+      ]
+    },
+    {
+      "username": "dan.okafor",
+      "firstName": "Daniel",
+      "lastName": "Okafor",
+      "email": "dan.okafor@finmates.com",
+      "displayName": "Dan Okafor",
+      "location": "London, UK",
+      "timezone": "Europe/London",
+      "bio": "Stablecoin yield and lending markets. Slow money, boring on purpose.",
+      "style": "yield",
+      "isPrivate": false,
+      "showPnl": true,
+      "watchWallets": [
+        {
+          "address": "0x5f1f6c7ae6944ef82966365946c1eeb2ea7a9505",
+          "label": "Arbitrum LP",
+          "chainId": 42161
+        },
+        {
+          "address": "0x559b4ef61c40d37f63c15b82bf5dc864dd80a23b",
+          "label": "OP multi-pool",
+          "chainId": 10
+        }
+      ]
+    },
+    {
+      "username": "sofia.mtz",
+      "firstName": "Sofia",
+      "lastName": "Martinez",
+      "email": "sofia.martinez@finmates.com",
+      "displayName": "Sofia Martinez",
+      "location": "Madrid, Spain",
+      "timezone": "Europe/Madrid",
+      "bio": "Uniswap v3 LP on ETH/USDC and WBTC/ETH. Tight ranges, frequent rebalancing.",
+      "style": "liquidity",
+      "isPrivate": false,
+      "showPnl": true,
+      "watchWallets": [
+        {
+          "address": "0x9a785591d648e2e1c41632843e40fb9e2223b94d",
+          "label": "Base AERO LP",
+          "chainId": 8453
+        },
+        {
+          "address": "0x286438884aadabd18058eda12efe3fdff840eff3",
+          "label": "Arb stables + ARB",
+          "chainId": 42161
+        }
+      ]
+    },
+    {
+      "username": "kenji.w",
+      "firstName": "Kenji",
+      "lastName": "Watanabe",
+      "email": "kenji.watanabe@finmates.com",
+      "displayName": "Kenji Watanabe",
+      "location": "Tokyo, Japan",
+      "timezone": "Asia/Tokyo",
+      "bio": "BTC and ETH long-term holder. Weekly DCA, macro notes on Sundays.",
+      "style": "hodl",
+      "isPrivate": false,
+      "showPnl": false,
+      "watchWallets": [
+        {
+          "address": "0xe56c470a342eedbb2e001e70d1c5765c042eb349",
+          "label": "OP stables",
+          "chainId": 10
+        }
+      ]
+    },
+    {
+      "username": "hannah.becker",
+      "firstName": "Hannah",
+      "lastName": "Becker",
+      "email": "hannah.becker@finmates.com",
+      "displayName": "Hannah Becker",
+      "location": "Berlin, Germany",
+      "timezone": "Europe/Berlin",
+      "bio": "Short-term perps trader. Strict stops, small size, lots of journaling.",
+      "style": "perps",
+      "isPrivate": true,
+      "showPnl": true,
+      "watchWallets": [
+        {
+          "address": "0xe341281e0695878ae0d147c7a9583e6188bd647a",
+          "label": "Mainnet multi",
+          "chainId": 1
+        },
+        {
+          "address": "0x059213d0adbd35def06ac6736c8bb310360c8a5d",
+          "label": "ARB/ETH",
+          "chainId": 42161
+        }
+      ]
+    },
+    {
+      "username": "marcus.reed",
+      "firstName": "Marcus",
+      "lastName": "Reed",
+      "email": "marcus.reed@finmates.com",
+      "displayName": "Marcus Reed",
+      "location": "Chicago, USA",
+      "timezone": "America/Chicago",
+      "bio": "Ex-equities options trader, now trading crypto volatility around BTC events.",
+      "style": "volatility",
+      "isPrivate": false,
+      "showPnl": true,
+      "watchWallets": [
+        {
+          "address": "0x4f0afd01e25f5323c4878a4acd0d54434e1b819f",
+          "label": "OP/ETH",
+          "chainId": 10
+        },
+        {
+          "address": "0x537b6f941ce307ab8c99a3340ce137197be5225f",
+          "label": "Base TOSHI",
+          "chainId": 8453
+        }
+      ]
+    },
+    {
+      "username": "aisha.khan",
+      "firstName": "Aisha",
+      "lastName": "Khan",
+      "email": "aisha.khan@finmates.com",
+      "displayName": "Aisha Khan",
+      "location": "Dubai, UAE",
+      "timezone": "Asia/Dubai",
+      "bio": "Base ecosystem explorer. Small bets on new tokens, sized so I can be wrong.",
+      "style": "early-stage",
+      "isPrivate": false,
+      "showPnl": true,
+      "watchWallets": [
+        {
+          "address": "0x7ccea090c8bce0038c9407c9341baf3f6c714fe2",
+          "label": "Arb active",
+          "chainId": 42161
+        }
+      ]
+    },
+    {
+      "username": "lucas.oliveira",
+      "firstName": "Lucas",
+      "lastName": "Oliveira",
+      "email": "lucas.oliveira@finmates.com",
+      "displayName": "Lucas Oliveira",
+      "location": "Sao Paulo, Brazil",
+      "timezone": "America/Sao_Paulo",
+      "bio": "Arbitrum DeFi: GMX, Pendle, ARB. Sharing trade ideas with entries and exits.",
+      "style": "defi-rotation",
+      "isPrivate": false,
+      "showPnl": true,
+      "watchWallets": [
+        {
+          "address": "0x1852dc4ca9839c9434a0b472348e3b5692db2a15",
+          "label": "Mainnet ETH/USDC",
+          "chainId": 1
+        },
+        {
+          "address": "0x31c2d750d043954748a687b2cf2872a2b5802fe2",
+          "label": "OP PENDLE",
+          "chainId": 10
+        }
+      ]
+    },
+    {
+      "username": "elena.petrova",
+      "firstName": "Elena",
+      "lastName": "Petrova",
+      "email": "elena.petrova@finmates.com",
+      "displayName": "Elena Petrova",
+      "location": "Tbilisi, Georgia",
+      "timezone": "Asia/Tbilisi",
+      "bio": "Quant hobbyist. Mean-reversion bots on majors, backtests before opinions.",
+      "style": "quant",
+      "isPrivate": true,
+      "showPnl": false,
+      "watchWallets": [
+        {
+          "address": "0x680d97f92a285b9eec791e8f7e94967f3c5b7e80",
+          "label": "Arb small",
+          "chainId": 42161
+        },
+        {
+          "address": "0x0a203b63b8ba79ecac1a66683682ede30d208007",
+          "label": "Mainnet NEAR",
+          "chainId": 1
+        }
+      ]
+    },
+    {
+      "username": "tom.nguyen",
+      "firstName": "Tom",
+      "lastName": "Nguyen",
+      "email": "tom.nguyen@finmates.com",
+      "displayName": "Tom Nguyen",
+      "location": "Sydney, Australia",
+      "timezone": "Australia/Sydney",
+      "bio": "Research-first: token unlocks, airdrops and treasury moves. Mostly ETH and stables.",
+      "style": "research",
+      "isPrivate": false,
+      "showPnl": true,
+      "watchWallets": [
+        {
+          "address": "0x4725c381dc55cb8edd73adb564b37b23fac26adc",
+          "label": "OP USDT",
+          "chainId": 10
+        },
+        {
+          "address": "0x778a93c3f4de7c658441153bb4e4d1f065ed13c8",
+          "label": "Mainnet cold",
+          "chainId": 1
+        }
+      ]
+    }
+  ],
+  "grantPremium": true,
+  "_walletsNote": "Public EOAs with open and closed Uniswap v3 positions (Arbitrum, Base, Optimism, Ethereum), added as watch-only. Not owned by these test users."
+}

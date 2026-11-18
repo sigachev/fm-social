@@ -140,6 +140,8 @@ public class ProfileMoneyController {
 
         boolean follower = viewerId != null
                 && follows.existsByFollowerIdAndFollowedIdAndStatus(viewerId, userId, FollowStatus.ACTIVE);
+        // "Who can see your profile: Followers" hides the money side from everyone else too.
+        if (!owner && p.getProfileVisibility() == ProfileVisibility.FOLLOWERS && !follower) return null;
         boolean portfolio = owner || switch (p.getPortfolioVisibility()) {
             case PUBLIC -> true;
             case FOLLOWERS -> follower;

@@ -96,10 +96,16 @@ public class ProfileMoneyController {
         JsonNode sum = sumM.blockOptional().orElse(null);
         if (sum instanceof ObjectNode o) {
             if (!access.pnl()) {
-                o.remove(java.util.List.of("return30dPct", "return12mPct", "profit12mUsd"));
+                o.remove(java.util.List.of("return30dPct", "return12mPct", "profit12mUsd", "profit30dUsd"));
+                // The profit line is P&L too: keep the value line, drop pnlUsd from every point.
+                for (String key : java.util.List.of("series90d", "series365d")) {
+                    if (o.get(key) instanceof com.fasterxml.jackson.databind.node.ArrayNode arr) {
+                        arr.forEach(n -> { if (n instanceof ObjectNode pt) pt.remove("pnlUsd"); });
+                    }
+                }
             }
             if (!access.positions()) {
-                o.remove(java.util.List.of("topHoldings", "lpUsd"));
+                o.remove(java.util.List.of("topHoldings", "lpUsd", "walletValues"));
             }
         }
         return ResponseEntity.ok(new MoneyResponse(userId, owner, access, hidden, sum,

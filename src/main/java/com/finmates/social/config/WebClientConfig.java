@@ -27,6 +27,9 @@ public class WebClientConfig {
     @Value("${finmates.services.crypto-url}")
     private String cryptoUrl;
 
+    @Value("${finmates.services.uniswap-url:http://uniswap}")
+    private String uniswapUrl;
+
     @Value("${finmates.internal.shared-secret}")
     private String sharedSecret;
 
@@ -65,6 +68,16 @@ public class WebClientConfig {
     public WebClient cryptoServiceWebClient() {
         return WebClient.builder()
                 .baseUrl(cryptoUrl)
+                .defaultHeader("X-Internal-Secret", sharedSecret)
+                .defaultHeader("User-Agent", "fm-social/1.0")
+                .clientConnector(buildConnector())
+                .build();
+    }
+
+    @Bean
+    public WebClient uniswapServiceWebClient() {
+        return WebClient.builder()
+                .baseUrl(uniswapUrl)
                 .defaultHeader("X-Internal-Secret", sharedSecret)
                 .defaultHeader("User-Agent", "fm-social/1.0")
                 .clientConnector(buildConnector())

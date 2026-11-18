@@ -38,6 +38,7 @@ public class SecurityConfig {
             "/swagger-ui/**",
             "/swagger-ui.html",
             "/api/profiles/*/public",
+            "/api/profiles/*/money",
             "/api/internal/**",
             // Mixed-auth endpoint: anonymous viewers get scope=global, authenticated
             // viewers get scope=network. Method-level @PreAuthorize("permitAll()")

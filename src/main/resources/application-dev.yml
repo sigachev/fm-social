@@ -34,6 +34,7 @@ finmates:
   services:
     main-url: http://localhost:8081
     crypto-url: http://localhost:8087
+    uniswap-url: http://localhost:8094
   internal:
     shared-secret: ${INTERNAL_SHARED_SECRET:dev-local-secret}
   feed:

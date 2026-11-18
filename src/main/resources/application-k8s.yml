@@ -58,6 +58,7 @@ finmates:
   services:
     main-url: http://main
     crypto-url: http://crypto
+    uniswap-url: http://uniswap
   internal:
     shared-secret: ${INTERNAL_SHARED_SECRET}
   feed:

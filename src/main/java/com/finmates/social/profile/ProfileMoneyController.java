@@ -72,6 +72,19 @@ public class ProfileMoneyController {
     public ResponseEntity<MoneyResponse> money(@PathVariable String username) {
         View v = view(username);
         if (v == null) return ResponseEntity.notFound().build();
+        return ResponseEntity.ok(moneyFor(v));
+    }
+
+    /**
+     * Service-to-service (fm-messaging's chat cards): {@code userId}'s money exactly as {@code viewerId} may see it on
+     * their profile, privacy settings applied. null when the viewer can't see the profile at all.
+     */
+    public MoneyResponse moneyAsSeenBy(Long viewerId, Long userId) {
+        View v = viewFor(viewerId, userId);
+        return v == null ? null : moneyFor(v);
+    }
+
+    private MoneyResponse moneyFor(View v) {
         Long userId = v.userId();
         boolean owner = v.owner();
         Profile p = v.profile();
@@ -86,7 +99,7 @@ public class ProfileMoneyController {
         }
 
         if (!access.portfolio()) {
-            return ResponseEntity.ok(new MoneyResponse(userId, owner, access, hidden, null, null, null));
+            return new MoneyResponse(userId, owner, access, hidden, null, null, null);
         }
 
         Mono<JsonNode> sumM = get(crypto, "/api/internal/users/{id}/public-summary", userId, "summary");
@@ -108,8 +121,8 @@ public class ProfileMoneyController {
                 o.remove(java.util.List.of("topHoldings", "lpUsd", "walletValues"));
             }
         }
-        return ResponseEntity.ok(new MoneyResponse(userId, owner, access, hidden, sum,
-                posM.blockOptional().orElse(null), trM.blockOptional().orElse(null)));
+        return new MoneyResponse(userId, owner, access, hidden, sum,
+                posM.blockOptional().orElse(null), trM.blockOptional().orElse(null));
     }
 
     /** Who is looking at whose profile, and what the owner's privacy settings let them see. */

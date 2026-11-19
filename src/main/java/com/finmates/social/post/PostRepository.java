@@ -26,6 +26,12 @@ public interface PostRepository extends JpaRepository<Post, Long> {
                                                 @Param("cursor") Long cursor,
                                                 Pageable pageable);
 
+    /** Everyone's public posts, newest first, skipping private accounts (keyset on id). */
+    @Query("SELECT p FROM Post p WHERE p.status = 'ACTIVE' AND p.visibility = com.finmates.social.post.PostVisibility.PUBLIC "
+            + "AND p.id < :cursor AND NOT EXISTS (SELECT 1 FROM Profile pr WHERE pr.userId = p.authorId AND pr.isPrivate = true) "
+            + "ORDER BY p.id DESC")
+    List<Post> findPublicBeforeCursor(@Param("cursor") Long cursor, Pageable pageable);
+
     long countByAuthorIdAndStatus(Long authorId, PostStatus status);
 
     @Modifying

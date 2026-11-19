@@ -35,18 +35,44 @@ public class FeedController {
     private final BlockRepository blockRepository;
     private final AuthenticatedUser authenticatedUser;
     private final FollowingFeedService followingFeedService;
+    private final com.finmates.social.follow.FollowRepository followRepository;
+
+    /**
+     * GET /api/feed/everyone: public posts from everyone (private accounts and blocks left out),
+     * newest first. {@code cursor} is the last post id of the previous page.
+     */
+    @GetMapping("/everyone")
+    @Operation(summary = "Public posts from everyone, newest first")
+    public ResponseEntity<FeedResponse> getEveryone(
+            @RequestParam(defaultValue = "9223372036854775807") long cursor,
+            @RequestParam(defaultValue = "20") int limit) {
+        limit = Math.min(Math.max(limit, 1), MAX_LIMIT);
+        Long userId = authenticatedUser.currentUserId();
+        List<Post> page = postRepository.findPublicBeforeCursor(cursor, org.springframework.data.domain.PageRequest.of(0, limit));
+        List<PostResponse> out = new ArrayList<>();
+        for (Post p : page) {
+            if (userId != null && blockRepository.existsBlockInEitherDirection(userId, p.getAuthorId())) continue;
+            out.add(postService.toPublicResponse(p));
+        }
+        Long next = page.isEmpty() ? null : page.get(page.size() - 1).getId();
+        return ResponseEntity.ok(new FeedResponse(out, next, page.size() == limit));
+    }
 
     @GetMapping
     @Operation(summary = "Get personalized feed",
                description = "Returns posts from followed users, newest first. Use nextCursor for pagination.")
     public ResponseEntity<FeedResponse> getFeed(
             @RequestParam(defaultValue = "9223372036854775807") long cursor,
-            @RequestParam(defaultValue = "20") int limit) {
+            @RequestParam(defaultValue = "20") int limit,
+            @RequestParam(defaultValue = "false") boolean matesOnly) {
 
         limit = Math.min(limit, MAX_LIMIT);
         if (limit <= 0) limit = DEFAULT_LIMIT;
 
         Long userId = authenticatedUser.currentUserId();
+
+        // Mates only: people who follow you back.
+        java.util.Set<Long> mates = matesOnly ? followRepository.findAllMateIds(userId) : null;
 
         // 1. Get post IDs from Redis feed
         List<Long> postIds = feedService.getFeed(userId, cursor, limit);
@@ -69,6 +95,7 @@ public class FeedController {
             if (post.getStatus() == com.finmates.social.post.PostStatus.REMOVED) continue;
             // Filter posts from users who blocked us or we blocked
             if (blockRepository.existsBlockInEitherDirection(userId, post.getAuthorId())) continue;
+            if (mates != null && !mates.contains(post.getAuthorId())) continue;
 
             responses.add(postService.toPublicResponse(post));
 

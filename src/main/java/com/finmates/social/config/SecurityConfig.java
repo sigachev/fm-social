@@ -5,6 +5,7 @@ import com.finmates.social.config.security.JwtAuthConverter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import com.finmates.social.config.security.AzpReportOnlyFilter;
+import com.finmates.social.config.security.McpClientGuardFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
@@ -95,6 +96,57 @@ public class SecurityConfig {
     @Value("${finmates.security.jwks.trust-store-type:PKCS12}")
     private String jwksTrustStoreType;
 
+
+    /**
+     * MCP server tokens (Keycloak token exchange, azp=fm-mcp, aud=finmates-services). They pass the decoder and are
+     * then held to {@link McpClientGuardFilter}: X-Internal-Secret, own audience, user_id and the routes below only.
+     */
+    @Value("${finmates.security.mcp.allowed-azp:fm-mcp}")
+    private String mcpAzp;
+
+    @Value("${finmates.security.mcp.audience:finmates-services}")
+    private String mcpAudience;
+
+    @Value("${finmates.internal.shared-secret:}")
+    private String mcpInternalSecret;
+
+    /** Comma-separated "METHOD /path/pattern" entries; blank = {@link #MCP_ROUTES}. */
+    @Value("${finmates.security.mcp.routes:}")
+    private String mcpRoutesOverride;
+
+    /** Every endpoint the MCP server may call as the user. Anything else is refused for its tokens. */
+    static final java.util.List<String> MCP_ROUTES = java.util.List.of(
+            "GET /api/follows/me/following",
+            "GET /api/follows/me/followers",
+            "GET /api/follows/me/stats",
+            "GET /api/follows/me/relationship/*",
+            "GET /api/profiles/me/mates-money",
+            "GET /api/profiles/me/mates-activity",
+            "GET /api/profiles/*/money",
+            "GET /api/feed",
+            "GET /api/feed/following",
+            "GET /api/feed/everyone",
+            "GET /api/notifications",
+            "GET /api/notifications/unread-count",
+            "GET /api/signals-feed",
+            "POST /api/notifications/read-all",
+            "POST /api/notifications/*/read",
+            "POST /api/posts");
+
+    /** The configured azp allowlist plus the MCP client ids (their use is limited by McpClientGuardFilter). */
+    java.util.List<String> effectiveAzp(java.util.List<String> configured) {
+        java.util.LinkedHashSet<String> all = new java.util.LinkedHashSet<>();
+        configured.forEach(a -> { if (a != null && !a.isBlank()) all.add(a.trim()); });
+        all.addAll(McpClientGuardFilter.azpList(mcpAzp));
+        return java.util.List.copyOf(all);
+    }
+
+    McpClientGuardFilter mcpClientGuardFilter() {
+        java.util.List<String> routes = mcpRoutesOverride == null || mcpRoutesOverride.isBlank() ? MCP_ROUTES
+                : java.util.Arrays.stream(mcpRoutesOverride.split(",")).map(String::trim).toList();
+        return new McpClientGuardFilter(McpClientGuardFilter.azpList(mcpAzp), mcpAudience, mcpInternalSecret, routes);
+    }
+
     private final JwtAuthConverter jwtAuthConverter;
     private final InternalSecretFilter internalSecretFilter;
     private final ProfileEnsureFilter profileEnsureFilter;
@@ -117,7 +169,7 @@ public class SecurityConfig {
     @Bean
     @Profile("!dev")
     public JwtDecoder jwtDecoder() throws Exception {
-        return verifiedJwtDecoder(issuerUri + JWKS_PATH, issuerUri, azpAllowed, azpEnforce,
+        return verifiedJwtDecoder(issuerUri + JWKS_PATH, issuerUri, effectiveAzp(azpAllowed), azpEnforce,
                 jwksTrustStore, jwksTrustStorePassword, jwksTrustStoreType);
     }
 
@@ -128,7 +180,7 @@ public class SecurityConfig {
     @Bean
     @Profile("dev")
     public JwtDecoder devTrustAllJwtDecoder() throws Exception {
-        return trustAllJwtDecoder(issuerUri + JWKS_PATH, issuerUri, azpAllowed, azpEnforce);
+        return trustAllJwtDecoder(issuerUri + JWKS_PATH, issuerUri, effectiveAzp(azpAllowed), azpEnforce);
     }
 
     /** dev-only composition (TLS verification disabled). */
@@ -173,7 +225,7 @@ public class SecurityConfig {
     public FilterRegistrationBean<AzpReportOnlyFilter> azpReportOnlyFilter(
             @Value("${spring.application.name:fm-social}") String serviceName) {
         FilterRegistrationBean<AzpReportOnlyFilter> registration = new FilterRegistrationBean<>(
-                new AzpReportOnlyFilter(serviceName, azpAllowed, azpEnforce));
+                new AzpReportOnlyFilter(serviceName, effectiveAzp(azpAllowed), azpEnforce));
         registration.setOrder(-50);
         return registration;
     }
@@ -195,6 +247,8 @@ public class SecurityConfig {
             )
             .addFilterBefore(internalSecretFilter,
                     org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter.class)
+            .addFilterAfter(mcpClientGuardFilter(),
+                    org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter.class)
             .addFilterAfter(profileEnsureFilter,
                     org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter.class);
 

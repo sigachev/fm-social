@@ -131,6 +131,7 @@ public class SecurityConfig {
             "GET /api/signals-feed",
             "POST /api/notifications/read-all",
             "POST /api/notifications/*/read",
+            "GET /api/posts/*",          // share_in_chat: a post card (public or the user's own)
             "POST /api/posts");
 
     /** The configured azp allowlist plus the MCP client ids (their use is limited by McpClientGuardFilter). */

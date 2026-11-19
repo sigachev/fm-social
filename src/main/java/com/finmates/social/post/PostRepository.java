@@ -28,7 +28,8 @@ public interface PostRepository extends JpaRepository<Post, Long> {
 
     /** Everyone's public posts, newest first, skipping private accounts (keyset on id). */
     @Query("SELECT p FROM Post p WHERE p.status = 'ACTIVE' AND p.visibility = com.finmates.social.post.PostVisibility.PUBLIC "
-            + "AND p.id < :cursor AND NOT EXISTS (SELECT 1 FROM Profile pr WHERE pr.userId = p.authorId AND pr.isPrivate = true) "
+            + "AND p.id < :cursor AND NOT EXISTS (SELECT 1 FROM Profile pr WHERE pr.userId = p.authorId "
+            + "AND (pr.isPrivate = true OR pr.profileVisibility <> com.finmates.social.profile.ProfileVisibility.PUBLIC)) "
             + "ORDER BY p.id DESC")
     List<Post> findPublicBeforeCursor(@Param("cursor") Long cursor, Pageable pageable);
 
@@ -61,6 +62,9 @@ public interface PostRepository extends JpaRepository<Post, Long> {
             SELECT * FROM posts
             WHERE status = 'ACTIVE'
               AND LOWER(content) LIKE :pattern
+              AND visibility = 'PUBLIC'
+              AND NOT EXISTS (SELECT 1 FROM profiles pr WHERE pr.user_id = posts.author_id
+                              AND (pr.is_private OR pr.profile_visibility <> 'PUBLIC'))
             ORDER BY
               CASE WHEN created_at >= NOW() - INTERVAL '24 hours'
                    THEN (reaction_count + comment_count * 2)
@@ -106,6 +110,9 @@ public interface PostRepository extends JpaRepository<Post, Long> {
             SELECT COUNT(*) FROM posts
             WHERE status = 'ACTIVE'
               AND LOWER(content) LIKE :pattern
+              AND visibility = 'PUBLIC'
+              AND NOT EXISTS (SELECT 1 FROM profiles pr WHERE pr.user_id = posts.author_id
+                              AND (pr.is_private OR pr.profile_visibility <> 'PUBLIC'))
             """, nativeQuery = true)
     long countByCashtagGlobal(@Param("pattern") String pattern);
 
@@ -114,6 +121,8 @@ public interface PostRepository extends JpaRepository<Post, Long> {
             WHERE status = 'ACTIVE'
               AND LOWER(content) LIKE :pattern
               AND author_id IN (:authorIds)
+              AND visibility = 'PUBLIC'
+              AND NOT EXISTS (SELECT 1 FROM profiles pr WHERE pr.user_id = posts.author_id AND pr.profile_visibility <> 'PUBLIC')
             """, nativeQuery = true)
     long countByCashtagAndAuthors(@Param("pattern") String pattern,
                                   @Param("authorIds") Collection<Long> authorIds);

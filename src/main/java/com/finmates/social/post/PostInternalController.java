@@ -25,6 +25,20 @@ public class PostInternalController {
      * Get any post by ID regardless of status — used by admin to preview reported content.
      * Returns REMOVED posts (unlike the public endpoint which returns 404 for removed posts).
      */
+    /**
+     * The post, when every listed user may see it (fm-messaging's post card: sender and recipient). 404 otherwise.
+     */
+    @GetMapping("/{id}/visible")
+    @Operation(summary = "A post if all the given users may see it (audience, account privacy, blocks)")
+    public org.springframework.http.ResponseEntity<PostResponse> visibleTo(@PathVariable Long id,
+                                                                          @RequestParam java.util.List<Long> viewers) {
+        if (viewers.isEmpty() || viewers.size() > 10) return org.springframework.http.ResponseEntity.badRequest().build();
+        for (Long v : viewers) {
+            if (postService.findVisible(id, v).isEmpty()) return org.springframework.http.ResponseEntity.notFound().build();
+        }
+        return org.springframework.http.ResponseEntity.ok(postService.getPost(id, viewers.get(0)));
+    }
+
     @GetMapping("/{id}")
     @Operation(summary = "Get post by ID (admin preview — includes removed posts)")
     public PostResponse getPost(@PathVariable Long id) {

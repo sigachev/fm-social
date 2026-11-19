@@ -34,9 +34,11 @@ public class SocialNotifier {
     private final PostRepository posts;
     private final BlockRepository blocks;
     private final UserLookupCache users;
+    private final com.finmates.social.access.AudienceService audience;
 
     public SocialNotifier(NotificationService notifications, CommentRepository comments, PostRepository posts,
-                          BlockRepository blocks, UserLookupCache users) {
+                          BlockRepository blocks, UserLookupCache users, com.finmates.social.access.AudienceService audience) {
+        this.audience = audience;
         this.notifications = notifications;
         this.comments = comments;
         this.posts = posts;
@@ -51,10 +53,12 @@ public class SocialNotifier {
             String link = linkFor(c);
             String snippet = snippet(c.getContent());
             String name = notifications.nameOf(c.getAuthorId());
+            // Notifications carry a snippet: only people who can see what the comment is on hear about it.
+            java.util.function.Predicate<Long> canSee = id -> canSeeTarget(id, c);
 
             if (c.getParentId() != null) {
                 comments.findById(c.getParentId()).ifPresent(parent -> {
-                    if (tell(parent.getAuthorId(), c.getAuthorId(), told)) {
+                    if (canSee.test(parent.getAuthorId()) && tell(parent.getAuthorId(), c.getAuthorId(), told)) {
                         notifications.notify(parent.getAuthorId(), "COMMENT_REPLY", c.getAuthorId(), name + " replied to your comment", snippet, link);
                     }
                 });
@@ -65,7 +69,7 @@ public class SocialNotifier {
                     }
                 });
             }
-            mentions(c.getContent(), c.getAuthorId(), told, name + " mentioned you in a comment", snippet, link);
+            mentions(c.getContent(), c.getAuthorId(), told, name + " mentioned you in a comment", snippet, link, canSee);
         } catch (Exception e) {
             log.warn("event=comment_notify_failed comment={} error={}", c.getId(), e.toString());
         }
@@ -76,20 +80,33 @@ public class SocialNotifier {
             Set<Long> told = new LinkedHashSet<>();
             told.add(p.getAuthorId());
             mentions(p.getContent(), p.getAuthorId(), told, notifications.nameOf(p.getAuthorId()) + " mentioned you in a post",
-                    snippet(p.getContent()), "/post/" + p.getId());
+                    snippet(p.getContent()), "/post/" + p.getId(), id -> audience.viewer(id).canSee(p));
         } catch (Exception e) {
             log.warn("event=post_notify_failed post={} error={}", p.getId(), e.toString());
         }
     }
 
-    private void mentions(String text, Long actorId, Set<Long> told, String title, String body, String link) {
+    /** Can userId see what this comment is on (its post or portfolio)? Token comments are public. */
+    private boolean canSeeTarget(Long userId, com.finmates.social.comment.Comment c) {
+        var viewer = audience.viewer(userId);
+        if (c.getTargetType() == com.finmates.social.comment.CommentTargetType.POST) {
+            return c.getTargetId() != null && posts.findById(c.getTargetId()).map(viewer::canSee).orElse(false);
+        }
+        if (c.getTargetType() == com.finmates.social.comment.CommentTargetType.PORTFOLIO) {
+            return c.getTargetId() != null && viewer.canSeePortfolio(c.getTargetId());
+        }
+        return true;
+    }
+
+    private void mentions(String text, Long actorId, Set<Long> told, String title, String body, String link,
+                          java.util.function.Predicate<Long> canSee) {
         if (text == null) return;
         Matcher m = MENTION.matcher(text);
         Set<String> names = new LinkedHashSet<>();
         while (m.find() && names.size() < MAX_MENTIONS) names.add(m.group(1).toLowerCase(Locale.ROOT));
         for (String u : names) {
             users.getByUsername(u).map(UserLookupCache.UserSummary::userId).ifPresent(id -> {
-                if (tell(id, actorId, told)) notifications.notify(id, "MENTION", actorId, title, body, link);
+                if (canSee.test(id) && tell(id, actorId, told)) notifications.notify(id, "MENTION", actorId, title, body, link);
             });
         }
     }

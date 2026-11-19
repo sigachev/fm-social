@@ -76,7 +76,7 @@ public class CommentController {
             @RequestParam(defaultValue = "20") int size) {
         size = Math.min(size, 100);
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
-        return commentService.getCommentsByPost(postId, pageable);
+        return commentService.getCommentsByPost(postId, pageable, authenticatedUser.currentUserIdOrNull());
     }
 
     @GetMapping("/portfolio/{userId}")
@@ -87,7 +87,7 @@ public class CommentController {
             @RequestParam(defaultValue = "20") int size) {
         size = Math.min(size, 100);
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
-        return commentService.getCommentsByPortfolio(userId, pageable);
+        return commentService.getCommentsByPortfolio(userId, pageable, authenticatedUser.currentUserIdOrNull());
     }
 
     @GetMapping("/asset/{symbol}")

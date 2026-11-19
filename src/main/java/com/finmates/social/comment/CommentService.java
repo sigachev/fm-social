@@ -35,9 +35,13 @@ public class CommentService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.finmates.social.notification.SocialNotifier socialNotifier;
 
+    private final com.finmates.social.access.AudienceService audience;
+
     public CommentService(CommentRepository commentRepository,
                           CommentEditRepository commentEditRepository,
-                          PostRepository postRepository) {
+                          PostRepository postRepository,
+                          com.finmates.social.access.AudienceService audience) {
+        this.audience = audience;
         this.commentRepository = commentRepository;
         this.commentEditRepository = commentEditRepository;
         this.postRepository = postRepository;
@@ -45,6 +49,17 @@ public class CommentService {
 
     @Transactional
     public CommentResponse createComment(Long authorId, String authorUsername, CommentCreateRequest req) {
+        // A reply stays on its parent's post, portfolio or token: it can't be used to write somewhere else.
+        if (req.getParentId() != null) {
+            Comment parent = commentRepository.findById(req.getParentId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Comment not found: " + req.getParentId()));
+            if (parent.getTargetType() != req.getTargetType() || !java.util.Objects.equals(parent.getTargetId(), req.getTargetId())
+                    || !java.util.Objects.equals(parent.getTargetSymbol(), req.getTargetSymbol() == null ? null : req.getTargetSymbol().toUpperCase())) {
+                throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST,
+                        "A reply must be on the same post, portfolio or token as the comment it answers");
+            }
+        }
+        requireCanSee(authorId, req.getTargetType(), req.getTargetId());
         Comment comment = new Comment();
         comment.setAuthorId(authorId);
         comment.setAuthorUsername(authorUsername);
@@ -71,6 +86,21 @@ public class CommentService {
 
     public CommentResponse getComment(Long id) {
         return toResponse(findActiveComment(id));
+    }
+
+    /**
+     * Comments are visible to whoever can see what they are on: the post (its audience and its author's account) or
+     * the portfolio (its owner's portfolio audience). Token comments are public. 404 otherwise, so nothing leaks.
+     */
+    public void requireCanSee(Long viewerId, CommentTargetType type, Long targetId) {
+        if (type == null) return;
+        var viewer = audience.viewer(viewerId);
+        boolean ok = switch (type) {
+            case POST -> targetId != null && postRepository.findById(targetId).map(viewer::canSee).orElse(false);
+            case PORTFOLIO -> targetId != null && viewer.canSeePortfolio(targetId);
+            case ASSET -> true;
+        };
+        if (!ok) throw new ResourceNotFoundException("Not found");
     }
 
     /** Admin preview — returns comment regardless of status (including REMOVED). */
@@ -137,11 +167,13 @@ public class CommentService {
         return toResponse(commentRepository.save(comment));
     }
 
-    public PageResponse<CommentResponse> getCommentsByPost(Long postId, Pageable pageable) {
+    public PageResponse<CommentResponse> getCommentsByPost(Long postId, Pageable pageable, Long viewerId) {
+        requireCanSee(viewerId, CommentTargetType.POST, postId);
         return PageResponse.from(commentRepository.findActiveByPostId(postId, pageable).map(this::toResponse));
     }
 
-    public PageResponse<CommentResponse> getCommentsByPortfolio(Long ownerUserId, Pageable pageable) {
+    public PageResponse<CommentResponse> getCommentsByPortfolio(Long ownerUserId, Pageable pageable, Long viewerId) {
+        requireCanSee(viewerId, CommentTargetType.PORTFOLIO, ownerUserId);
         return PageResponse.from(commentRepository.findActiveByPortfolioOwnerId(ownerUserId, pageable).map(this::toResponse));
     }
 

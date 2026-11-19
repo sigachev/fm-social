@@ -76,12 +76,15 @@ public class FollowingFeedService {
     private final UserLookupCache userLookupCache;
     private final CryptoPerformanceClient performanceClient;
     private final WebClient cryptoClient;
+    private final com.finmates.social.access.AudienceService audience;
 
     public FollowingFeedService(FollowRepository followRepository,
                                 ProfileService profileService,
                                 UserLookupCache userLookupCache,
                                 CryptoPerformanceClient performanceClient,
-                                @Qualifier("cryptoServiceWebClient") WebClient cryptoClient) {
+                                @Qualifier("cryptoServiceWebClient") WebClient cryptoClient,
+                                com.finmates.social.access.AudienceService audience) {
+        this.audience = audience;
         this.followRepository = followRepository;
         this.profileService = profileService;
         this.userLookupCache = userLookupCache;
@@ -100,6 +103,16 @@ public class FollowingFeedService {
         // 1. Follow graph — empty short-circuit avoids a wasted crypto round-trip.
         Set<Long> followedIds = followRepository.findAllFollowingIds(viewerUserId);
         if (followedIds == null || followedIds.isEmpty()) {
+            return List.of();
+        }
+        // Trades are portfolio data: only people whose portfolio (and trade activity) this viewer may see,
+        // exactly as on their profile.
+        var viewer = audience.viewer(viewerUserId);
+        followedIds = followedIds.stream()
+                .filter(id -> viewer.canSeePortfolio(id) && viewer.profile(id)
+                        .map(p -> p.isShowTradingActivity() && p.isShowTradeHistory()).orElse(false))
+                .collect(java.util.stream.Collectors.toSet());
+        if (followedIds.isEmpty()) {
             return List.of();
         }
 

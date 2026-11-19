@@ -44,6 +44,7 @@ public class ProfileService {
     private final S3Service s3Service;
     private final UserLookupCache userLookupCache;
     private final WebClient cryptoServiceWebClient;
+    private final com.finmates.social.access.AudienceService audience;
 
     public ProfileService(ProfileRepository profileRepository,
                           FollowRepository followRepository,
@@ -52,7 +53,9 @@ public class ProfileService {
                           PostRepository postRepository,
                           S3Service s3Service,
                           UserLookupCache userLookupCache,
-                          @Qualifier("cryptoServiceWebClient") WebClient cryptoServiceWebClient) {
+                          @Qualifier("cryptoServiceWebClient") WebClient cryptoServiceWebClient,
+                          com.finmates.social.access.AudienceService audience) {
+        this.audience = audience;
         this.profileRepository = profileRepository;
         this.followRepository = followRepository;
         this.followService = followService;
@@ -136,15 +139,11 @@ public class ProfileService {
 
         return switch (profile.getProfileVisibility()) {
             case PRIVATE -> throw new ForbiddenActionException("This profile is private");
-            case FOLLOWERS -> {
-                // V16: PENDING requesters must NOT yet see FOLLOWERS-mode profile fields.
-                // Full consolidation onto ConnectionsPermissionService is Phase 3.
-                boolean isFollowing = viewerId != null &&
-                        followRepository.existsByFollowerIdAndFollowedIdAndStatus(
-                                viewerId, targetUserId, FollowStatus.ACTIVE);
-                yield toFilteredPublicResponse(profile, isFollowing, isFollowing);
+            // Mates-only profile, a private account the viewer doesn't follow, or a block: name and avatar only.
+            case MATES, PUBLIC -> {
+                boolean full = audience.viewer(viewerId).canSeeAccount(targetUserId);
+                yield toFilteredPublicResponse(profile, full, full);
             }
-            case PUBLIC -> toFilteredPublicResponse(profile, true, true);
         };
     }
 
@@ -354,14 +353,20 @@ public class ProfileService {
         java.util.List<com.finmates.social.profile.dto.ProfileSummaryResponse> mutualShown =
                 mutual.isEmpty() ? java.util.List.of() : getBatchSummaries(mutual.subList(0, Math.min(3, mutual.size())));
 
+        // Mates-only profiles (and private accounts) show their name to everyone, the rest only to their audience;
+        // portfolio numbers only to the portfolio's audience.
+        var viewer = audience.viewer(viewerId);
+        boolean fullProfile = viewer.canSeeAccount(targetUserId);
+        boolean showPortfolio = viewer.canSeePortfolio(targetUserId);
+
         String avatarUrl = resolveAvatarUrl(profile);
-        String coverUrl = profile.getCoverKey() != null
+        String coverUrl = fullProfile && profile.getCoverKey() != null
                 ? s3Service.createPresignedGet(profile.getCoverKey()) : null;
 
         String displayName = resolveDisplayName(profile);
 
         PortfolioSummaryResponse portfolio = null;
-        try {
+        if (showPortfolio) try {
             portfolio = cryptoServiceWebClient.get()
                     .uri("/api/internal/portfolios/user/{id}/summary", targetUserId)
                     .retrieve()
@@ -385,7 +390,7 @@ public class ProfileService {
                 targetUserId,
                 userSummary.username(),
                 displayName,
-                profile.getBio(),
+                fullProfile ? profile.getBio() : null,
                 avatarUrl,
                 coverUrl,
                 new PublicProfileResponse.Stats(postsCount, followersCount, followingCount),

@@ -45,6 +45,7 @@ class CommentServiceTest {
     @Mock CommentRepository commentRepository;
     @Mock CommentEditRepository commentEditRepository;
     @Mock PostRepository postRepository;
+    @Mock com.finmates.social.access.AudienceService audience;
 
     @InjectMocks CommentService service;
 
@@ -55,7 +56,8 @@ class CommentServiceTest {
         ReflectionTestUtils.setField(service, "editWindowMinutes", 60_000);
         // commentRepository.save returns its argument — service code reads the
         // saved Comment back to build the response DTO.
-        when(commentRepository.save(any(Comment.class)))
+        // lenient: the tests where the comment is refused never save.
+        org.mockito.Mockito.lenient().when(commentRepository.save(any(Comment.class)))
                 .thenAnswer(inv -> inv.getArgument(0));
     }
 
@@ -86,6 +88,10 @@ class CommentServiceTest {
     @Test
     @DisplayName("createComment on a reply (parent_id set) extracts cashtags too")
     void createComment_replyAlsoExtracts() {
+        Comment parent = new Comment();
+        parent.setTargetType(CommentTargetType.ASSET);
+        parent.setTargetSymbol("BTC");
+        org.mockito.Mockito.when(commentRepository.findById(99L)).thenReturn(java.util.Optional.of(parent));
         CommentCreateRequest req = assetCreateRequest("$BTC reply", 99L);
 
         service.createComment(7L, "alice", req);
@@ -162,6 +168,34 @@ class CommentServiceTest {
         // taking the last is the simplest cross-cutting assertion.
         verify(commentRepository, times(1)).save(cap.capture());
         return cap.getValue();
+    }
+
+    @Test
+    @DisplayName("a reply can't move to another target than its parent's")
+    void createComment_replyMustStayOnItsParentsTarget() {
+        Comment parent = new Comment();
+        parent.setTargetType(CommentTargetType.POST);
+        parent.setTargetId(5L);
+        org.mockito.Mockito.when(commentRepository.findById(99L)).thenReturn(java.util.Optional.of(parent));
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.createComment(7L, "alice", assetCreateRequest("$BTC", 99L)))
+                .hasMessageContaining("same post");
+    }
+
+    @Test
+    @DisplayName("commenting on a post you can't see is not found")
+    void createComment_onAnInvisiblePostIsNotFound() {
+        var viewer = org.mockito.Mockito.mock(com.finmates.social.access.AudienceService.Viewer.class);
+        org.mockito.Mockito.when(audience.viewer(7L)).thenReturn(viewer);
+        com.finmates.social.post.Post post = new com.finmates.social.post.Post();
+        org.mockito.Mockito.when(postRepository.findById(5L)).thenReturn(java.util.Optional.of(post));
+        org.mockito.Mockito.when(viewer.canSee(post)).thenReturn(false);
+        CommentCreateRequest r = new CommentCreateRequest();
+        r.setTargetType(CommentTargetType.POST);
+        r.setTargetId(5L);
+        r.setContent("hi");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.createComment(7L, "alice", r))
+                .isInstanceOf(com.finmates.social.common.exception.ResourceNotFoundException.class);
+        org.mockito.Mockito.verify(commentRepository, org.mockito.Mockito.never()).save(org.mockito.ArgumentMatchers.any());
     }
 
     private CommentCreateRequest assetCreateRequest(String content, Long parentId) {

@@ -52,6 +52,7 @@ public class PostService {
     @Autowired(required = false)
     private RedisTemplate<String, String> redisTemplate;
     private final ObjectMapper objectMapper;
+    private final com.finmates.social.access.AudienceService audience;
 
     /** Short-lived cache: avoids a profile DB hit per post during feed / profile renders. */
     private final Cache<Long, AuthorInfo> authorCache = Caffeine.newBuilder()
@@ -75,7 +76,9 @@ public class PostService {
                        ProfileRepository profileRepository,
                        FollowRepository followRepository,
                        BlockRepository blockRepository,
-                       ObjectMapper objectMapper) {
+                       ObjectMapper objectMapper,
+                       com.finmates.social.access.AudienceService audience) {
+        this.audience = audience;
         this.postRepository = postRepository;
         this.postEditRepository = postEditRepository;
         this.s3Service = s3Service;
@@ -149,6 +152,20 @@ public class PostService {
         return toResponse(findActivePost(id));
     }
 
+    /** A post as {@code viewerId} may see it (null = signed out); 404 when they can't, so nothing leaks. */
+    public PostResponse getPost(Long id, Long viewerId) {
+        Post post = postRepository.findById(id).orElse(null);
+        if (post == null || !audience.viewer(viewerId).canSee(post)) {
+            throw new ResourceNotFoundException("Post not found: " + id);
+        }
+        return toResponse(post);
+    }
+
+    /** The post entity when {@code viewerId} may see it; for comments, reactions and internal callers. */
+    public java.util.Optional<Post> findVisible(Long id, Long viewerId) {
+        return postRepository.findById(id).filter(p -> audience.viewer(viewerId).canSee(p));
+    }
+
     /** Admin preview — returns post regardless of status (including REMOVED). */
     public PostResponse getPostForAdmin(Long id) {
         return toResponse(findPost(id));
@@ -211,7 +228,11 @@ public class PostService {
     }
 
     /** Returns user posts in FeedResponse shape (cursor-based) — used by the public endpoint. */
-    public FeedResponse getUserPostsFeed(Long userId, Long cursor, int limit) {
+    public FeedResponse getUserPostsFeed(Long userId, Long cursor, int limit, Long viewerId) {
+        var viewer = audience.viewer(viewerId);
+        if (!viewer.canSeeAccount(userId)) {
+            throw new com.finmates.social.common.exception.ForbiddenActionException("This profile isn't visible to you");
+        }
         int fetchSize = limit + 1;
         Pageable pageable = PageRequest.of(0, fetchSize);
 
@@ -223,7 +244,8 @@ public class PostService {
         if (hasMore) posts = new ArrayList<>(posts.subList(0, limit));
 
         Long nextCursor = (hasMore && !posts.isEmpty()) ? posts.get(posts.size() - 1).getId() : null;
-        List<PostResponse> responses = posts.stream().map(this::toResponse).toList();
+        // Mates-only and only-me posts drop out for viewers outside that audience (the cursor still moves on).
+        List<PostResponse> responses = posts.stream().filter(viewer::canSee).map(this::toResponse).toList();
 
         return new FeedResponse(responses, nextCursor, hasMore);
     }
@@ -363,7 +385,10 @@ public class PostService {
         final String pattern = "%$" + normalized.toLowerCase() + "%";
 
         if (scope == CashtagScope.GLOBAL) {
-            return getGlobalCashtagPostsCached(normalized, pattern, limit);
+            List<PostResponse> all = getGlobalCashtagPostsCached(normalized, pattern, limit);
+            if (viewerId == null) return all;
+            var viewer = audience.viewer(viewerId);
+            return all.stream().filter(r -> !viewer.blockedWith(r.authorId())).toList();
         }
 
         // NETWORK scope: viewerId is guaranteed non-null by the controller.
@@ -373,7 +398,8 @@ public class PostService {
         }
 
         List<Post> rows = postRepository.findByCashtagNetwork(pattern, followingIds, limit);
-        return filterBlocksAndMap(rows, viewerId);
+        var viewer = audience.viewer(viewerId);
+        return rows.stream().filter(viewer::canSee).map(this::toResponse).toList();
     }
 
     /**
@@ -398,8 +424,8 @@ public class PostService {
             }
         }
 
+        // Shared across viewers, so the query returns only posts anyone could see (public post, public account).
         List<Post> rows = postRepository.findByCashtagGlobal(pattern, limit);
-        // No viewerId on global scope → no block filter possible.
         List<PostResponse> responses = rows.stream().map(this::toResponse).toList();
 
         // Cache write — best-effort. Failure is non-fatal (next request rebuilds).
@@ -413,23 +439,5 @@ public class PostService {
         }
 
         return responses;
-    }
-
-    /**
-     * Mirrors {@code FeedService}'s post-fetch block filter: drops any post
-     * authored by a user who has a {@code blocks} row in either direction with
-     * the viewer. Result size may be less than {@code limit} after filtering —
-     * over-fetch-to-compensate is intentionally NOT implemented (see Prompt B
-     * Flag 3 decision).
-     */
-    private List<PostResponse> filterBlocksAndMap(List<Post> rows, Long viewerId) {
-        List<PostResponse> out = new ArrayList<>(rows.size());
-        for (Post p : rows) {
-            if (blockRepository.existsBlockInEitherDirection(viewerId, p.getAuthorId())) {
-                continue;
-            }
-            out.add(toResponse(p));
-        }
-        return out;
     }
 }

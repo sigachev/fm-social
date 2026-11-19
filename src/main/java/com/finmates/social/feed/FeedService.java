@@ -54,7 +54,13 @@ public class FeedService {
      */
     public void fanOutPost(Post post) {
         try {
-            List<Long> followerIds = followRepository.findAllFollowerIds(post.getAuthorId());
+            // Push only to people in the post's audience: mates for a mates-only post, nobody else for only-me.
+            // (Reads check again, so a stale entry is never shown.)
+            List<Long> followerIds = switch (post.getVisibility() == null ? com.finmates.social.post.PostVisibility.PUBLIC : post.getVisibility()) {
+                case PUBLIC -> followRepository.findAllFollowerIds(post.getAuthorId());
+                case MATES -> new java.util.ArrayList<>(followRepository.findAllMateIds(post.getAuthorId()));
+                case PRIVATE -> List.<Long>of();
+            };
             double score = post.getCreatedAt() != null
                     ? post.getCreatedAt().toInstant().toEpochMilli()
                     : System.currentTimeMillis();

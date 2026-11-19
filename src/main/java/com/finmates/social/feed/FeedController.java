@@ -36,6 +36,7 @@ public class FeedController {
     private final AuthenticatedUser authenticatedUser;
     private final FollowingFeedService followingFeedService;
     private final com.finmates.social.follow.FollowRepository followRepository;
+    private final com.finmates.social.access.AudienceService audience;
 
     /**
      * GET /api/feed/everyone: public posts from everyone (private accounts and blocks left out),
@@ -50,8 +51,9 @@ public class FeedController {
         Long userId = authenticatedUser.currentUserId();
         List<Post> page = postRepository.findPublicBeforeCursor(cursor, org.springframework.data.domain.PageRequest.of(0, limit));
         List<PostResponse> out = new ArrayList<>();
+        var viewer = audience.viewer(userId);
         for (Post p : page) {
-            if (userId != null && blockRepository.existsBlockInEitherDirection(userId, p.getAuthorId())) continue;
+            if (!viewer.canSee(p)) continue;   // blocks (the query already keeps only public posts on public accounts)
             out.add(postService.toPublicResponse(p));
         }
         Long next = page.isEmpty() ? null : page.get(page.size() - 1).getId();
@@ -89,21 +91,20 @@ public class FeedController {
         List<PostResponse> responses = new ArrayList<>();
         Long oldestTimestamp = null;
 
+        var viewer = audience.viewer(userId);
         for (Long postId : postIds) {
-            Post post = postsById.get(postId);
-            if (post == null) continue;  // deleted post, skip
-            if (post.getStatus() == com.finmates.social.post.PostStatus.REMOVED) continue;
-            // Filter posts from users who blocked us or we blocked
-            if (blockRepository.existsBlockInEitherDirection(userId, post.getAuthorId())) continue;
-            if (mates != null && !mates.contains(post.getAuthorId())) continue;
-
-            responses.add(postService.toPublicResponse(post));
-
-            // Track oldest timestamp for nextCursor
+            // The cursor moves past every entry, shown or not, so a filtered post can't stall paging.
             Long ts = feedService.getPostTimestamp(userId, postId);
             if (ts != null && (oldestTimestamp == null || ts < oldestTimestamp)) {
                 oldestTimestamp = ts;
             }
+            Post post = postsById.get(postId);
+            if (post == null) continue;  // deleted post, skip
+            // Removed, blocked, or outside the post's audience now (people unfollow; posts go mates-only).
+            if (!viewer.canSee(post)) continue;
+            if (mates != null && !mates.contains(post.getAuthorId())) continue;
+
+            responses.add(postService.toPublicResponse(post));
         }
 
         boolean hasMore = postIds.size() == limit;

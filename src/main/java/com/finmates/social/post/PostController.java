@@ -58,7 +58,7 @@ public class PostController {
     @ApiResponse(responseCode = "200", description = "Post found")
     @ApiResponse(responseCode = "404", description = "Post not found")
     public PostResponse getPost(@PathVariable Long id) {
-        return postService.getPost(id);
+        return postService.getPost(id, authenticatedUser.currentUserIdOrNull());
     }
 
     @PatchMapping("/{id}")
@@ -147,8 +147,7 @@ public class PostController {
             @RequestParam(required = false) Long cursor,
             @RequestParam(defaultValue = "20") int limit) {
         Long viewerId = authenticatedUser.currentUserId();
-        permissionService.requireCanView(viewerId, userId, Scope.FEED);
         limit = Math.min(limit, 50);
-        return postService.getUserPostsFeed(userId, cursor, limit);
+        return postService.getUserPostsFeed(userId, cursor, limit, viewerId);
     }
 }

@@ -76,8 +76,33 @@ class FollowingFeedServiceTest {
                 .exchangeFunction(exchange)
                 .build();
 
+        profileRepository = mock(com.finmates.social.profile.ProfileRepository.class);
+        org.mockito.Mockito.lenient().when(profileRepository.findById(org.mockito.ArgumentMatchers.anyLong()))
+                .thenAnswer(inv -> java.util.Optional.of(profile(inv.getArgument(0), com.finmates.social.profile.PortfolioVisibility.PUBLIC)));
+        var audience = new com.finmates.social.access.AudienceService(followRepository,
+                mock(com.finmates.social.block.BlockRepository.class), profileRepository);
         service = new FollowingFeedService(
-                followRepository, profileService, userLookupCache, performanceClient, cryptoClient);
+                followRepository, profileService, userLookupCache, performanceClient, cryptoClient, audience);
+    }
+
+    private com.finmates.social.profile.ProfileRepository profileRepository;
+
+    static com.finmates.social.profile.Profile profile(Long id, com.finmates.social.profile.PortfolioVisibility v) {
+        var p = new com.finmates.social.profile.Profile();
+        p.setUserId(id);
+        p.setPortfolioVisibility(v);
+        p.setShowTradingActivity(true);
+        p.setShowTradeHistory(true);
+        return p;
+    }
+
+    @Test
+    void tradesOfPeopleWhosePortfolioIsMatesOnlyAreNotFetchedForNonMates() {
+        when(followRepository.findAllFollowingIds(1L)).thenReturn(Set.of(2L));
+        when(followRepository.findAllMateIds(1L)).thenReturn(Set.of());
+        when(profileRepository.findById(2L)).thenReturn(java.util.Optional.of(profile(2L, com.finmates.social.profile.PortfolioVisibility.MATES)));
+        assertThat(service.getFollowingActivity(1L, 20)).isEmpty();
+        assertThat(cryptoCallCount.get()).isZero();
     }
 
     private void scriptTrades(String body) {

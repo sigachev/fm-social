@@ -23,9 +23,13 @@ public class ReactionService {
     private final PostRepository postRepository;
     private final CommentRepository commentRepository;
 
+    private final com.finmates.social.comment.CommentService comments;
+
     public ReactionService(ReactionRepository reactionRepository,
                            PostRepository postRepository,
-                           CommentRepository commentRepository) {
+                           CommentRepository commentRepository,
+                           com.finmates.social.comment.CommentService comments) {
+        this.comments = comments;
         this.reactionRepository = reactionRepository;
         this.postRepository = postRepository;
         this.commentRepository = commentRepository;
@@ -33,6 +37,7 @@ public class ReactionService {
 
     @Transactional
     public ReactionToggleResponse toggleReaction(Long userId, ReactionCreateRequest req) {
+        requireCanSee(userId, req.getTargetType(), req.getTargetId());
         Optional<Reaction> existing = reactionRepository.findByUserIdAndTargetTypeAndTargetIdAndReactionType(
                 userId, req.getTargetType(), req.getTargetId(), req.getReactionType());
 
@@ -54,6 +59,7 @@ public class ReactionService {
 
     @Transactional(readOnly = true)
     public ReactionAggregateResponse getAggregates(ReactionTargetType targetType, Long targetId, Long viewerId) {
+        requireCanSee(viewerId, targetType, targetId);
         List<Reaction> reactions = reactionRepository.findByTargetTypeAndTargetId(targetType, targetId);
 
         Map<ReactionType, Long> counts = new EnumMap<>(ReactionType.class);
@@ -81,6 +87,17 @@ public class ReactionService {
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /** Reactions follow what they are on: a post's audience, or the post or portfolio a comment is on. */
+    private void requireCanSee(Long viewerId, ReactionTargetType type, Long targetId) {
+        if (type == ReactionTargetType.POST) {
+            comments.requireCanSee(viewerId, com.finmates.social.comment.CommentTargetType.POST, targetId);
+        } else if (type == ReactionTargetType.COMMENT) {
+            var c = targetId == null ? null : commentRepository.findById(targetId).orElse(null);
+            if (c == null) throw new com.finmates.social.common.exception.ResourceNotFoundException("Not found");
+            comments.requireCanSee(viewerId, c.getTargetType(), c.getTargetId());
+        }
+    }
 
     private void adjustReactionCount(ReactionTargetType targetType, Long targetId, int delta) {
         switch (targetType) {

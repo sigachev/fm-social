@@ -47,11 +47,14 @@ public class ProfileMoneyController {
     private final AuthenticatedUser authenticatedUser;
     private final WebClient crypto;
     private final WebClient uniswap;
+    private final com.finmates.social.access.AudienceService audience;
 
     public ProfileMoneyController(ProfileRepository profiles, FollowRepository follows, BlockRepository blocks,
                                   UserLookupCache users, AuthenticatedUser authenticatedUser,
                                   @Qualifier("cryptoServiceWebClient") WebClient crypto,
-                                  @Qualifier("uniswapServiceWebClient") WebClient uniswap) {
+                                  @Qualifier("uniswapServiceWebClient") WebClient uniswap,
+                                  com.finmates.social.access.AudienceService audience) {
+        this.audience = audience;
         this.profiles = profiles;
         this.follows = follows;
         this.blocks = blocks;
@@ -91,7 +94,7 @@ public class ProfileMoneyController {
         Access access = v.access();
 
         java.util.List<String> hidden = new java.util.ArrayList<>();
-        if (!access.portfolio()) hidden.add(p.getPortfolioVisibility() == PortfolioVisibility.FOLLOWERS ? "portfolio:followers" : "portfolio");
+        if (!access.portfolio()) hidden.add(p.getPortfolioVisibility() == PortfolioVisibility.MATES ? "portfolio:mates" : "portfolio");
         else {
             if (!access.pnl()) hidden.add("pnl");
             if (!access.positions()) hidden.add("positions");
@@ -145,21 +148,12 @@ public class ProfileMoneyController {
         Profile p = profiles.findById(userId).orElse(null);
         if (p == null) return null;
 
-        boolean owner = userId.equals(viewerId);
-        if (!owner) {
-            if (p.getProfileVisibility() == ProfileVisibility.PRIVATE) return null;
-            if (viewerId != null && blocks.existsBlockInEitherDirection(viewerId, userId)) return null;
-        }
-
-        boolean follower = viewerId != null
-                && follows.existsByFollowerIdAndFollowedIdAndStatus(viewerId, userId, FollowStatus.ACTIVE);
-        // "Who can see your profile: Followers" hides the money side from everyone else too.
-        if (!owner && p.getProfileVisibility() == ProfileVisibility.FOLLOWERS && !follower) return null;
-        boolean portfolio = owner || switch (p.getPortfolioVisibility()) {
-            case PUBLIC -> true;
-            case FOLLOWERS -> follower;
-            case PRIVATE -> false;
-        };
+        var viewer = audience.viewer(viewerId);
+        boolean owner = viewer.isOwner(userId);
+        // Profile hidden from this viewer (only me, mates-only for a non-mate, a private account they don't follow,
+        // a block): the money side doesn't exist for them either.
+        if (!owner && !viewer.canSeeAccount(userId)) return null;
+        boolean portfolio = owner || viewer.canSeePortfolio(userId);
         Access access = new Access(portfolio,
                 portfolio && (owner || p.isShowPnl()),
                 portfolio && (owner || p.isShowPositions()),

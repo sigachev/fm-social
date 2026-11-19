@@ -78,6 +78,11 @@ public interface CommentRepository extends JpaRepository<Comment, Long> {
           AND c.status = 'ACTIVE'
           AND c.target_type IN ('ASSET', 'POST')
           AND NOT (c.target_type = 'ASSET' AND c.target_symbol = :currentSymbol)
+          -- comments on posts only when anyone could see the post (public post, public account)
+          AND (c.target_type <> 'POST' OR EXISTS (
+                SELECT 1 FROM posts vp WHERE vp.id = c.target_id AND vp.status = 'ACTIVE' AND vp.visibility = 'PUBLIC'
+                  AND NOT EXISTS (SELECT 1 FROM profiles vpr WHERE vpr.user_id = vp.author_id
+                                  AND (vpr.is_private OR vpr.profile_visibility <> 'PUBLIC'))))
         ORDER BY c.created_at DESC, c.id DESC
         LIMIT :limit OFFSET :offset
         """, nativeQuery = true)
@@ -94,6 +99,11 @@ public interface CommentRepository extends JpaRepository<Comment, Long> {
           AND c.status = 'ACTIVE'
           AND c.target_type IN ('ASSET', 'POST')
           AND NOT (c.target_type = 'ASSET' AND c.target_symbol = :currentSymbol)
+          -- comments on posts only when anyone could see the post (public post, public account)
+          AND (c.target_type <> 'POST' OR EXISTS (
+                SELECT 1 FROM posts vp WHERE vp.id = c.target_id AND vp.status = 'ACTIVE' AND vp.visibility = 'PUBLIC'
+                  AND NOT EXISTS (SELECT 1 FROM profiles vpr WHERE vpr.user_id = vp.author_id
+                                  AND (vpr.is_private OR vpr.profile_visibility <> 'PUBLIC'))))
         """, nativeQuery = true)
     long countMentionsForSymbol(@Param("currentSymbol") String currentSymbol);
 

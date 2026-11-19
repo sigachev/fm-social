@@ -201,7 +201,11 @@ public class ProfileMoneyController {
     @PreAuthorize("isAuthenticated()")
     @Operation(summary = "Dashboard: the viewer's and their mates' money, each mate's privacy applied")
     public MatesMoneyResponse matesMoney(@RequestParam(defaultValue = "true") boolean withLastTrade) {
-        Long viewerId = authenticatedUser.currentUserId();
+        return matesMoneyFor(authenticatedUser.currentUserId(), withLastTrade);
+    }
+
+    /** Same as {@link #matesMoney} for a given viewer (the daily digest). */
+    public MatesMoneyResponse matesMoneyFor(Long viewerId, boolean withLastTrade) {
         var page = follows.findActiveFollowingMatesOnly(viewerId, org.springframework.data.domain.PageRequest.of(0, MATES_LIMIT));
         java.util.List<Long> ids = page.getContent().stream().map(f -> f.getFollowedId()).distinct().toList();
 

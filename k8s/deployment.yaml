@@ -36,6 +36,19 @@ spec:
               value: "false"
             - name: SERVER_PORT
               value: '80'
+            # Browser notifications: optional, push stays off until the fm-webpush secret exists.
+            - name: WEBPUSH_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fm-webpush
+                  key: public-key
+                  optional: true
+            - name: WEBPUSH_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fm-webpush
+                  key: private-key
+                  optional: true
             - name: INTERNAL_SHARED_SECRET
               valueFrom:
                 secretKeyRef:

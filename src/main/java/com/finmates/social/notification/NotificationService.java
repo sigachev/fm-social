@@ -35,7 +35,8 @@ public class NotificationService {
             "MY_SIGNALS", java.util.Set.of("MY_SIGNAL_HIT", "MY_SIGNAL_STOPPED", "MY_SIGNAL_EXPIRED"),
             "MESSAGES", java.util.Set.of("MESSAGE", "MESSAGE_REQUEST"),
             "PRICE_ALERTS", java.util.Set.of("PRICE_ALERT"),
-            "LIQUIDITY", java.util.Set.of("LP_NEAR_EDGE", "LP_OUT_OF_RANGE", "LP_BACK_IN_RANGE"));
+            "LIQUIDITY", java.util.Set.of("LP_NEAR_EDGE", "LP_OUT_OF_RANGE", "LP_BACK_IN_RANGE"),
+            "DIGEST", java.util.Set.of("DIGEST"));
 
     /** Which category a notification belongs to; the author's own signal results are MY_SIGNALS. */
     static String categoryOf(String type, boolean aboutSelf) {
@@ -50,10 +51,12 @@ public class NotificationService {
     private final UserLookupCache users;
     private final ProfileRepository profiles;
     private final NotificationStream stream;
+    private final NotificationDelivery delivery;
 
     public NotificationService(JdbcTemplate jdbc, FollowRepository follows, UserLookupCache users, ProfileRepository profiles,
-                               NotificationStream stream) {
+                               NotificationStream stream, NotificationDelivery delivery) {
         this.stream = stream;
+        this.delivery = delivery;
         this.jdbc = jdbc;
         this.follows = follows;
         this.users = users;
@@ -70,7 +73,7 @@ public class NotificationService {
     // ── settings ──
     public java.util.Map<String, Boolean> settings(Long userId) {
         java.util.Map<String, Boolean> out = new java.util.LinkedHashMap<>();
-        for (String c : List.of("FOLLOWS", "PEOPLES_SIGNALS", "MY_SIGNALS", "MESSAGES", "PRICE_ALERTS", "LIQUIDITY")) out.put(c, true);
+        for (String c : List.of("FOLLOWS", "PEOPLES_SIGNALS", "MY_SIGNALS", "MESSAGES", "PRICE_ALERTS", "LIQUIDITY", "DIGEST")) out.put(c, true);
         jdbc.query("SELECT category, enabled FROM notification_settings WHERE user_id = ?",
                 rs -> { if (out.containsKey(rs.getString(1))) out.put(rs.getString(1), rs.getBoolean(2)); }, userId);
         return out;
@@ -121,6 +124,8 @@ public class NotificationService {
             for (Long u : userIds) rows.add(new Object[]{u, cut(type, 40), actorId, cut(title, 200), cut(body, 500), cut(link, 300)});
             jdbc.batchUpdate("INSERT INTO notifications (user_id, type, actor_id, title, body, link) VALUES (?, ?, ?, ?, ?, ?)", rows);
             stream.publish(userIds, new NotificationStream.Event(cut(type, 40), actorId, cut(title, 200), cut(body, 500), cut(link, 300), Instant.now()));
+            // Browser push and email, by each person's choices (background).
+            delivery.dispatch(userIds, type, categoryOf(type, actorId == null), cut(title, 200), cut(body, 500), cut(link, 300));
         } catch (Exception e) {
             log.warn("event=notification_insert_failed type={} actor={} recipients={} error={}", type, actorId, userIds.size(), e.toString());
         }

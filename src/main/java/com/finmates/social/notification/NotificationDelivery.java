@@ -23,7 +23,7 @@ import java.util.concurrent.Executors;
 @Service
 public class NotificationDelivery {
 
-    public static final List<String> ORDER = List.of("PRICE_ALERTS", "LIQUIDITY", "MESSAGES", "FOLLOWS", "MY_SIGNALS", "PEOPLES_SIGNALS", "DIGEST");
+    public static final List<String> ORDER = List.of("PRICE_ALERTS", "LIQUIDITY", "MESSAGES", "REPLIES", "FOLLOWS", "MY_SIGNALS", "PEOPLES_SIGNALS", "DIGEST");
 
     public record Channels(boolean inApp, boolean push, boolean email) {}
 

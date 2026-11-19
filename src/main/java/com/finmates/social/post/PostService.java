@@ -64,6 +64,10 @@ public class PostService {
     @Value("${finmates.edit-window-minutes}")
     private int editWindowMinutes;
 
+    /** Mentions in posts (optional so slice tests can skip it). */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.finmates.social.notification.SocialNotifier socialNotifier;
+
     public PostService(PostRepository postRepository,
                        PostEditRepository postEditRepository,
                        S3Service s3Service,
@@ -137,6 +141,7 @@ public class PostService {
             log.error("Feed fan-out failed for post {}: {}", post.getId(), e.getMessage());
         }
 
+        if (socialNotifier != null) socialNotifier.postCreated(post);
         return toResponse(post);
     }
 

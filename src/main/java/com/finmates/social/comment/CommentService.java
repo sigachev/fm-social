@@ -31,6 +31,10 @@ public class CommentService {
     @Value("${finmates.edit-window-minutes}")
     private int editWindowMinutes;
 
+    /** Replies, comments on your post and mentions (optional so slice tests can skip it). */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.finmates.social.notification.SocialNotifier socialNotifier;
+
     public CommentService(CommentRepository commentRepository,
                           CommentEditRepository commentEditRepository,
                           PostRepository postRepository) {
@@ -60,6 +64,7 @@ public class CommentService {
         if (req.getTargetType() == CommentTargetType.POST && req.getTargetId() != null) {
             postRepository.adjustCommentCount(req.getTargetId(), 1);
         }
+        if (socialNotifier != null) socialNotifier.commentCreated(saved);
 
         return toResponse(saved);
     }

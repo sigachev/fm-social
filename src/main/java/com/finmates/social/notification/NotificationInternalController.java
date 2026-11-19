@@ -41,6 +41,12 @@ public class NotificationInternalController {
             r = new Request(r.audience(), r.userId(), r.actorId(), r.type(), r.title().replace("{actor}", name),
                     r.body() == null ? null : r.body().replace("{actor}", name), r.link());
         }
+        // "{actorUsername}" in a link becomes the actor's username (e.g. /u/{actorUsername}).
+        if (r.actorId() != null && r.link() != null && r.link().contains("{actorUsername}")) {
+            String u = service.usernameOf(r.actorId());
+            r = new Request(r.audience(), r.userId(), r.actorId(), r.type(), r.title(), r.body(),
+                    u == null ? null : r.link().replace("{actorUsername}", u));
+        }
         if ("FOLLOWERS".equalsIgnoreCase(r.audience())) {
             if (r.actorId() == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "actorId is required");
             return Map.of("recipients", service.notifyFollowers(r.actorId(), r.type(), r.title(), r.body(), r.link()));

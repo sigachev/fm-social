@@ -35,9 +35,12 @@ public class SocialNotifier {
     private final BlockRepository blocks;
     private final UserLookupCache users;
     private final com.finmates.social.access.AudienceService audience;
+    private final org.springframework.jdbc.core.JdbcTemplate jdbc;
 
     public SocialNotifier(NotificationService notifications, CommentRepository comments, PostRepository posts,
-                          BlockRepository blocks, UserLookupCache users, com.finmates.social.access.AudienceService audience) {
+                          BlockRepository blocks, UserLookupCache users, com.finmates.social.access.AudienceService audience,
+                          org.springframework.jdbc.core.JdbcTemplate jdbc) {
+        this.jdbc = jdbc;
         this.audience = audience;
         this.notifications = notifications;
         this.comments = comments;
@@ -62,6 +65,11 @@ public class SocialNotifier {
                         notifications.notify(parent.getAuthorId(), "COMMENT_REPLY", c.getAuthorId(), name + " replied to your comment", snippet, link);
                     }
                 });
+            } else if (c.getTargetType() == CommentTargetType.PORTFOLIO && c.getTargetId() != null) {
+                // A note on someone's portfolio: tell the owner.
+                if (tell(c.getTargetId(), c.getAuthorId(), told)) {
+                    notifications.notify(c.getTargetId(), "PORTFOLIO_NOTE", c.getAuthorId(), name + " left a note on your portfolio", snippet, link);
+                }
             } else if (c.getTargetType() == CommentTargetType.POST && c.getTargetId() != null) {
                 posts.findById(c.getTargetId()).ifPresent(p -> {
                     if (tell(p.getAuthorId(), c.getAuthorId(), told)) {
@@ -98,6 +106,13 @@ public class SocialNotifier {
         return true;
     }
 
+    private boolean mentionAllowed(Long actorId, Long mentionedId) {
+        var viewer = audience.viewer(actorId);
+        return viewer.profile(mentionedId)
+                .map(p -> viewer.allows(mentionedId, com.finmates.social.access.AudienceService.of(p.getMentionsPermission())))
+                .orElse(false);
+    }
+
     private void mentions(String text, Long actorId, Set<Long> told, String title, String body, String link,
                           java.util.function.Predicate<Long> canSee) {
         if (text == null) return;
@@ -106,7 +121,10 @@ public class SocialNotifier {
         while (m.find() && names.size() < MAX_MENTIONS) names.add(m.group(1).toLowerCase(Locale.ROOT));
         for (String u : names) {
             users.getByUsername(u).map(UserLookupCache.UserSummary::userId).ifPresent(id -> {
-                if (canSee.test(id) && tell(id, actorId, told)) notifications.notify(id, "MENTION", actorId, title, body, link);
+                // "Who can mention you": only people the mentioned user allows notify them.
+                if (canSee.test(id) && mentionAllowed(actorId, id) && tell(id, actorId, told)) {
+                    notifications.notify(id, "MENTION", actorId, title, body, link);
+                }
             });
         }
     }
@@ -119,8 +137,41 @@ public class SocialNotifier {
         return true;
     }
 
+    /**
+     * Someone liked a post or a comment: tell its author, at most once a day per person and item, so liking and
+     * unliking can't flood the bell.
+     */
+    public void reactionAdded(Long actorId, com.finmates.social.reaction.ReactionTargetType type, Long targetId) {
+        try {
+            Long owner;
+            String what, link;
+            if (type == com.finmates.social.reaction.ReactionTargetType.POST) {
+                var p = posts.findById(targetId).orElse(null);
+                if (p == null) return;
+                owner = p.getAuthorId();
+                what = "your post";
+                link = "/post/" + p.getId();
+            } else {
+                var c = comments.findById(targetId).orElse(null);
+                if (c == null) return;
+                owner = c.getAuthorId();
+                what = "your comment";
+                link = linkFor(c);
+            }
+            if (owner == null || owner.equals(actorId)) return;
+            Integer recent = jdbc.queryForObject("SELECT COUNT(*) FROM notifications WHERE user_id = ? AND type = 'REACTION' "
+                    + "AND actor_id = ? AND link IS NOT DISTINCT FROM ? AND created_at > NOW() - INTERVAL '1 day'",
+                    Integer.class, owner, actorId, link);
+            if (recent != null && recent > 0) return;
+            notifications.notify(owner, "REACTION", actorId, notifications.nameOf(actorId) + " liked " + what, null, link);
+        } catch (Exception e) {
+            log.warn("event=reaction_notify_failed target={} error={}", targetId, e.toString());
+        }
+    }
+
     private String linkFor(Comment c) {
         if (c.getTargetType() == CommentTargetType.POST && c.getTargetId() != null) return "/post/" + c.getTargetId() + "#comment-" + c.getId();
+        if (c.getTargetType() == CommentTargetType.PORTFOLIO && c.getTargetId() != null) return "/profile#comment-" + c.getId();
         if (c.getTargetType() == CommentTargetType.ASSET && c.getTargetSymbol() != null) {
             return "/token/" + c.getTargetSymbol().toLowerCase(Locale.ROOT) + "?comment=" + c.getId();
         }

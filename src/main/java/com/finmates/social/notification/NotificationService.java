@@ -37,7 +37,15 @@ public class NotificationService {
             "PRICE_ALERTS", java.util.Set.of("PRICE_ALERT"),
             "LIQUIDITY", java.util.Set.of("LP_NEAR_EDGE", "LP_OUT_OF_RANGE", "LP_BACK_IN_RANGE"),
             "DIGEST", java.util.Set.of("DIGEST"),
-            "REPLIES", java.util.Set.of("COMMENT_REPLY", "COMMENT_ON_POST", "MENTION"));
+            "REPLIES", java.util.Set.of("COMMENT_REPLY", "COMMENT_ON_POST", "MENTION", "PORTFOLIO_NOTE"),
+            "REACTIONS", java.util.Set.of("REACTION"));
+
+    /** Per-action overrides live in notification_settings under this prefix + the type (e.g. T:MENTION). */
+    public static final String TYPE_PREFIX = "T:";
+
+    public static boolean knownType(String type) {
+        return type != null && CATEGORIES.values().stream().anyMatch(s -> s.contains(type));
+    }
 
     /** Which category a notification belongs to; the author's own signal results are MY_SIGNALS. */
     static String categoryOf(String type, boolean aboutSelf) {
@@ -67,14 +75,14 @@ public class NotificationService {
     public void notify(Long userId, String type, Long actorId, String title, String body, String link) {
         if (userId == null || Objects.equals(userId, actorId)) return;
         // A notification with no actor about a signal is the author's own result (MY_SIGNALS).
-        if (!enabled(userId, categoryOf(type, actorId == null))) return;
+        if (!enabled(userId, categoryOf(type, actorId == null), type)) return;
         insert(List.of(userId), type, actorId, title, body, link);
     }
 
     // ── settings ──
     public java.util.Map<String, Boolean> settings(Long userId) {
         java.util.Map<String, Boolean> out = new java.util.LinkedHashMap<>();
-        for (String c : List.of("FOLLOWS", "PEOPLES_SIGNALS", "MY_SIGNALS", "MESSAGES", "PRICE_ALERTS", "LIQUIDITY", "DIGEST", "REPLIES")) out.put(c, true);
+        for (String c : List.of("FOLLOWS", "PEOPLES_SIGNALS", "MY_SIGNALS", "MESSAGES", "PRICE_ALERTS", "LIQUIDITY", "DIGEST", "REPLIES", "REACTIONS")) out.put(c, true);
         jdbc.query("SELECT category, enabled FROM notification_settings WHERE user_id = ?",
                 rs -> { if (out.containsKey(rs.getString(1))) out.put(rs.getString(1), rs.getBoolean(2)); }, userId);
         return out;
@@ -89,11 +97,15 @@ public class NotificationService {
         return settings(userId);
     }
 
-    private boolean enabled(Long userId, String category) {
+    /** In the bell? The action's own switch if set, else its category's; on by default. */
+    private boolean enabled(Long userId, String category, String type) {
         if (category == null) return true;
         try {
-            List<Boolean> r = jdbc.queryForList("SELECT enabled FROM notification_settings WHERE user_id = ? AND category = ?", Boolean.class, userId, category);
-            return r.isEmpty() || Boolean.TRUE.equals(r.get(0));
+            java.util.Map<String, Boolean> r = new java.util.HashMap<>();
+            jdbc.query("SELECT category, enabled FROM notification_settings WHERE user_id = ? AND category IN (?, ?)",
+                    rs -> { r.put(rs.getString(1), rs.getBoolean(2)); }, userId, category, TYPE_PREFIX + type);
+            Boolean t = r.get(TYPE_PREFIX + type);
+            return t != null ? t : r.getOrDefault(category, true);
         } catch (Exception e) {
             return true;
         }
@@ -105,14 +117,15 @@ public class NotificationService {
                 .filter(id -> !Objects.equals(id, actorId)).distinct().limit(MAX_FANOUT).toList();
         String category = categoryOf(type, false);
         if (category != null && !ids.isEmpty()) {
-            // Drop followers who switched this category off.
+            // Drop followers who switched this action off (or its category, unless they turned the action back on).
             String in = String.join(",", java.util.Collections.nCopies(ids.size(), "?"));
             List<Object> args = new ArrayList<>(ids);
             args.add(category);
-            java.util.Set<Long> off = new java.util.HashSet<>(jdbc.queryForList(
-                    "SELECT user_id FROM notification_settings WHERE user_id IN (" + in + ") AND category = ? AND enabled = FALSE",
-                    Long.class, args.toArray()));
-            if (!off.isEmpty()) ids = ids.stream().filter(id -> !off.contains(id)).toList();
+            args.add(TYPE_PREFIX + type);
+            java.util.Map<Long, Boolean> cat = new java.util.HashMap<>(), own = new java.util.HashMap<>();
+            jdbc.query("SELECT user_id, category, enabled FROM notification_settings WHERE user_id IN (" + in + ") AND category IN (?, ?)",
+                    rs -> { (rs.getString(2).startsWith(TYPE_PREFIX) ? own : cat).put(rs.getLong(1), rs.getBoolean(3)); }, args.toArray());
+            ids = ids.stream().filter(id -> own.getOrDefault(id, cat.getOrDefault(id, true))).toList();
         }
         insert(ids, type, actorId, title, body, link);
         return ids.size();

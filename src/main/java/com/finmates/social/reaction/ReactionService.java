@@ -25,6 +25,10 @@ public class ReactionService {
 
     private final com.finmates.social.comment.CommentService comments;
 
+    /** Likes notify the author (optional so slice tests can skip it). */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.finmates.social.notification.SocialNotifier socialNotifier;
+
     public ReactionService(ReactionRepository reactionRepository,
                            PostRepository postRepository,
                            CommentRepository commentRepository,
@@ -53,6 +57,7 @@ public class ReactionService {
             reaction.setReactionType(req.getReactionType());
             reactionRepository.save(reaction);
             adjustReactionCount(req.getTargetType(), req.getTargetId(), 1);
+            if (socialNotifier != null) socialNotifier.reactionAdded(userId, req.getTargetType(), req.getTargetId());
             return new ReactionToggleResponse(true);
         }
     }

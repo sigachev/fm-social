@@ -98,14 +98,20 @@ public class CommentService {
      * owner). Posts and tokens take comments from anyone who can see them.
      */
     void requireCanComment(Long authorId, CommentTargetType type, Long targetId) {
-        if (type != CommentTargetType.PORTFOLIO || targetId == null) return;
+        if (targetId == null || type == CommentTargetType.ASSET || type == null) return;
         var viewer = audience.viewer(authorId);
-        var level = viewer.profile(targetId).map(p -> com.finmates.social.access.AudienceService.of(p.getNotesPermission()))
+        boolean portfolio = type == CommentTargetType.PORTFOLIO;
+        // The owner: the portfolio's user, or the post's author ("who can comment on your posts").
+        Long owner = portfolio ? targetId : postRepository.findById(targetId).map(com.finmates.social.post.Post::getAuthorId).orElse(null);
+        if (owner == null) return;
+        var level = viewer.profile(owner)
+                .map(p -> com.finmates.social.access.AudienceService.of(portfolio ? p.getNotesPermission() : p.getPostCommentsPermission()))
                 .orElse(com.finmates.social.access.AudienceService.Level.ONLY_ME);
-        if (!viewer.allows(targetId, level)) {
-            throw new com.finmates.social.common.exception.ForbiddenActionException(
-                    level == com.finmates.social.access.AudienceService.Level.MATES
-                            ? "Only their mates can leave notes here" : "They've turned off notes on their portfolio");
+        if (!viewer.allows(owner, level)) {
+            boolean mates = level == com.finmates.social.access.AudienceService.Level.MATES;
+            throw new com.finmates.social.common.exception.ForbiddenActionException(portfolio
+                    ? (mates ? "Only their mates can leave notes here" : "They've turned off notes on their portfolio")
+                    : (mates ? "Only their mates can comment on their posts" : "They've turned off comments on their posts"));
         }
     }
 

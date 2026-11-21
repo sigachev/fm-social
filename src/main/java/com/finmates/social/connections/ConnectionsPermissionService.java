@@ -71,6 +71,13 @@ public class ConnectionsPermissionService {
             return false;
         }
 
+        // Rule 6: "Who can see your followers and following" narrows the lists further (Mates / Only me).
+        if (scope == Scope.FOLLOW_LISTS) {
+            var level = target.getConnectionsVisibility();
+            if (level == com.finmates.social.profile.PermissionLevel.DISABLED) return false;
+            if (level == com.finmates.social.profile.PermissionLevel.MATES) return viewerId != null && isMate(viewerId, targetId);
+        }
+
         // Rule 3: public profile — anyone (including anonymous) sees the scope
         if (!target.isPrivate()) {
             return true;

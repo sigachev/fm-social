@@ -53,6 +53,9 @@ public record ProfileResponse(
         PermissionLevel notesPermission,
         PermissionLevel signalCommentsPermission,
         AllowMessages allowMessages,
+        PermissionLevel postCommentsPermission,
+        PermissionLevel mentionsPermission,
+        PermissionLevel connectionsVisibility,
         OffsetDateTime createdAt,
         OffsetDateTime updatedAt
 ) {}

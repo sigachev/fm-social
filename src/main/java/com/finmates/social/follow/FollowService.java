@@ -91,6 +91,10 @@ public class FollowService {
         // create a follow row against a non-existent user.
         Profile target = profileRepository.findById(followedId)
                 .orElseThrow(() -> new ResourceNotFoundException("Profile not found: " + followedId));
+        // "Who can follow you: No one" (existing follows stay; only new ones are refused).
+        if (!target.isAllowFollowers()) {
+            throw new com.finmates.social.common.exception.ForbiddenActionException("They aren't accepting new followers");
+        }
         FollowStatus initialStatus = target.isPrivate() ? FollowStatus.PENDING : FollowStatus.ACTIVE;
 
         Follow follow = new Follow();

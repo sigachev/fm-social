@@ -19,8 +19,13 @@ import java.util.Map;
 @PreAuthorize("isAuthenticated()")
 public class NotificationChannelsController {
 
+    /**
+     * @param types        each category's actions
+     * @param typeSettings the per-action choices the user made (an action without one follows its category)
+     */
     public record ChannelsView(Map<String, NotificationDelivery.Channels> categories, NotificationDelivery.Prefs prefs,
-                               boolean pushAvailable, String pushPublicKey, int pushDevices) {}
+                               boolean pushAvailable, String pushPublicKey, int pushDevices,
+                               Map<String, java.util.List<String>> types, Map<String, Map<String, Boolean>> typeSettings) {}
 
     public record ChannelsUpdate(Map<String, Map<String, Boolean>> categories, NotificationDelivery.Prefs prefs) {}
 
@@ -40,7 +45,12 @@ public class NotificationChannelsController {
     @Operation(summary = "Per-category channels, quiet hours, digest and push availability")
     public ChannelsView channels() {
         long u = me.currentUserId();
-        return new ChannelsView(delivery.channels(u), delivery.prefs(u), push.configured(), push.publicKey(), push.devices(u));
+        Map<String, java.util.List<String>> types = new java.util.LinkedHashMap<>();
+        for (String c : NotificationDelivery.ORDER) {
+            types.put(c, NotificationService.CATEGORIES.getOrDefault(c, java.util.Set.of()).stream().sorted().toList());
+        }
+        return new ChannelsView(delivery.channels(u), delivery.prefs(u), push.configured(), push.publicKey(), push.devices(u),
+                types, delivery.typeOverrides(u));
     }
 
     @PutMapping("/api/notifications/channels")

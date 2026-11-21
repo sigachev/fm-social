@@ -23,7 +23,7 @@ import java.util.concurrent.Executors;
 @Service
 public class NotificationDelivery {
 
-    public static final List<String> ORDER = List.of("PRICE_ALERTS", "LIQUIDITY", "MESSAGES", "REPLIES", "FOLLOWS", "MY_SIGNALS", "PEOPLES_SIGNALS", "DIGEST");
+    public static final List<String> ORDER = List.of("PRICE_ALERTS", "LIQUIDITY", "MESSAGES", "REPLIES", "REACTIONS", "FOLLOWS", "MY_SIGNALS", "PEOPLES_SIGNALS", "DIGEST");
 
     public record Channels(boolean inApp, boolean push, boolean email) {}
 
@@ -64,10 +64,50 @@ public class NotificationDelivery {
         return out;
     }
 
+    /** Per-action overrides the user set: type -> the channels they set (missing = follows the category). */
+    public Map<String, Map<String, Boolean>> typeOverrides(long userId) {
+        Map<String, Map<String, Boolean>> out = new LinkedHashMap<>();
+        jdbc.query("SELECT category, enabled, push, email FROM notification_settings WHERE user_id = ? AND category LIKE 'T:%'", rs -> {
+            Map<String, Boolean> m = new LinkedHashMap<>();
+            m.put("inApp", rs.getBoolean(2));
+            if (rs.getObject(3) != null) m.put("push", rs.getBoolean(3));
+            if (rs.getObject(4) != null) m.put("email", rs.getBoolean(4));
+            out.put(rs.getString(1).substring(NotificationService.TYPE_PREFIX.length()), m);
+        }, userId);
+        return out;
+    }
+
+    /**
+     * Keys are categories or {@code T:<TYPE>} for one action. Changing a category resets its actions' overrides, so
+     * the category switch means "all of these".
+     */
     public void updateChannels(long userId, Map<String, Map<String, Boolean>> changes) {
         changes.forEach((c, ch) -> {
-            if (!ORDER.contains(c) || ch == null) return;
+            boolean type = c.startsWith(NotificationService.TYPE_PREFIX)
+                    && NotificationService.knownType(c.substring(NotificationService.TYPE_PREFIX.length()));
+            if ((!ORDER.contains(c) && !type) || ch == null) return;
+            if (!type && NotificationService.CATEGORIES.containsKey(c)) {
+                List<Object> keys = new ArrayList<>();
+                keys.add(userId);
+                NotificationService.CATEGORIES.get(c).forEach(t -> keys.add(NotificationService.TYPE_PREFIX + t));
+                jdbc.update("DELETE FROM notification_settings WHERE user_id = ? AND category IN ("
+                        + String.join(",", Collections.nCopies(keys.size() - 1, "?")) + ")", keys.toArray());
+            }
             Boolean inApp = ch.get("inApp"), p = ch.get("push"), e = ch.get("email");
+            if (type) {
+                // A new override starts from the category's current choices, so setting one channel changes only it.
+                String cat = NotificationService.categoryOf(c.substring(NotificationService.TYPE_PREFIX.length()), false);
+                Channels cc = cat == null ? null : channels(userId).get(cat);
+                if (cc != null) {
+                    boolean exists = !jdbc.queryForList("SELECT 1 FROM notification_settings WHERE user_id = ? AND category = ?",
+                            Integer.class, userId, c).isEmpty();
+                    if (!exists) {
+                        inApp = inApp != null ? inApp : cc.inApp();
+                        p = p != null ? p : cc.push();
+                        e = e != null ? e : cc.email();
+                    }
+                }
+            }
             jdbc.update("""
                     INSERT INTO notification_settings (user_id, category, enabled, push, email) VALUES (?, ?, COALESCE(?, TRUE), ?, ?)
                     ON CONFLICT (user_id, category) DO UPDATE SET
@@ -135,15 +175,20 @@ public class NotificationDelivery {
         if (push.configured()) {
             withDevice.addAll(jdbc.queryForList("SELECT DISTINCT user_id FROM push_subscriptions WHERE user_id IN (" + in + ")", Long.class, ids.toArray()));
         }
-        // Explicit per-category choices for these people.
+        // Explicit choices for these people: the action's own (T:TYPE) wins over its category's.
         Map<Long, Boolean> pushSet = new HashMap<>(), emailSet = new HashMap<>();
         if (cat != null) {
             List<Object> args = new ArrayList<>(ids);
             args.add(cat);
-            jdbc.query("SELECT user_id, push, email FROM notification_settings WHERE user_id IN (" + in + ") AND category = ?", rs -> {
-                if (rs.getObject(2) != null) pushSet.put(rs.getLong(1), rs.getBoolean(2));
-                if (rs.getObject(3) != null) emailSet.put(rs.getLong(1), rs.getBoolean(3));
+            args.add(NotificationService.TYPE_PREFIX + type);
+            Map<Long, Boolean> pushOwn = new HashMap<>(), emailOwn = new HashMap<>();
+            jdbc.query("SELECT user_id, category, push, email FROM notification_settings WHERE user_id IN (" + in + ") AND category IN (?, ?)", rs -> {
+                boolean own = rs.getString(2).startsWith(NotificationService.TYPE_PREFIX);
+                if (rs.getObject(3) != null) (own ? pushOwn : pushSet).put(rs.getLong(1), rs.getBoolean(3));
+                if (rs.getObject(4) != null) (own ? emailOwn : emailSet).put(rs.getLong(1), rs.getBoolean(4));
             }, args.toArray());
+            pushSet.putAll(pushOwn);
+            emailSet.putAll(emailOwn);
         }
         boolean urgent = URGENT.contains(type);
         Instant now = Instant.now();

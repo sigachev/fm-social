@@ -87,6 +87,18 @@ class ConnectionsPermissionServiceTest {
         }
 
         @Test
+        @DisplayName("connections visibility narrows the follower lists only")
+        void connectionsVisibilityNarrowsFollowLists() {
+            publicProfile.setConnectionsVisibility(com.finmates.social.profile.PermissionLevel.DISABLED);
+            when(profileRepository.findById(TARGET)).thenReturn(Optional.of(publicProfile));
+            assertThat(service.canView(STRANGER, TARGET, Scope.FOLLOW_LISTS)).isFalse();
+            assertThat(service.canView(null, TARGET, Scope.FOLLOW_LISTS)).isFalse();
+            assertThat(service.canView(STRANGER, TARGET, Scope.FEED)).isTrue();
+            publicProfile.setConnectionsVisibility(com.finmates.social.profile.PermissionLevel.MATES);
+            assertThat(service.canView(null, TARGET, Scope.FOLLOW_LISTS)).isFalse();
+        }
+
+        @Test
         @DisplayName("public profile: any scope visible to authenticated and anonymous viewers")
         void publicProfileVisibleToAll() {
             when(profileRepository.findById(TARGET)).thenReturn(Optional.of(publicProfile));

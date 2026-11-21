@@ -112,6 +112,21 @@ public class Profile {
     @Column(name = "signal_comments_permission", nullable = false, length = 20)
     private PermissionLevel signalCommentsPermission = PermissionLevel.PUBLIC;
 
+    /** Who can comment on your posts (V24). */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "post_comments_permission", nullable = false, length = 20)
+    private PermissionLevel postCommentsPermission = PermissionLevel.PUBLIC;
+
+    /** Who can mention you: mentions from anyone else don't notify you (V24). */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "mentions_permission", nullable = false, length = 20)
+    private PermissionLevel mentionsPermission = PermissionLevel.PUBLIC;
+
+    /** Who can see your followers and following lists; DISABLED = only you (V24). */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "connections_visibility", nullable = false, length = 20)
+    private PermissionLevel connectionsVisibility = PermissionLevel.PUBLIC;
+
     @Column(name = "allow_copy_trading", nullable = false)
     private boolean allowCopyTrading = false;
 

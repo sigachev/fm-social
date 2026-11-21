@@ -72,8 +72,30 @@ public class ProfileService {
                 .orElseThrow(() -> new ResourceNotFoundException("Profile not found for user: " + userId));
     }
 
+    /**
+     * The owner's profile. Also drops a picture whose file is gone from storage, so Settings
+     * offers "Upload" instead of showing a broken image. A storage error leaves the key alone.
+     */
+    @Transactional
     public ProfileResponse getOwnProfile(Long userId) {
-        return toFullResponse(getProfile(userId));
+        Profile p = getProfile(userId);
+        boolean changed = false;
+        if (p.getCoverKey() != null && missing(p.getCoverKey())) {
+            log.warn("Cover file missing for user {} ({}); clearing it", userId, p.getCoverKey());
+            p.setCoverKey(null);
+            changed = true;
+        }
+        if (p.getAvatarKey() != null && missing(p.getAvatarKey())) {
+            log.warn("Avatar file missing for user {} ({}); clearing it", userId, p.getAvatarKey());
+            p.setAvatarKey(null);
+            changed = true;
+        }
+        return toFullResponse(changed ? profileRepository.save(p) : p);
+    }
+
+    private boolean missing(String key) {
+        try { return !s3Service.objectExists(key); }
+        catch (RuntimeException e) { return false; }
     }
 
     @Transactional
@@ -91,14 +113,13 @@ public class ProfileService {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                         "Avatar not yet uploaded to S3");
             }
-            // Delete old avatar key (best-effort — don't fail the update if deletion fails)
-            if (profile.getAvatarKey() != null) {
-                s3Service.delete(profile.getAvatarKey());
-            }
+            // Copy first, delete the old one after: a failed copy must not leave the profile without a picture.
+            String oldAvatar = profile.getAvatarKey();
             String filename = req.getAvatarKey().substring(req.getAvatarKey().lastIndexOf('/') + 1);
             String finalKey = folder + "/" + filename;
             s3Service.copy(req.getAvatarKey(), finalKey);
             profile.setAvatarKey(finalKey);
+            if (oldAvatar != null && !oldAvatar.equals(finalKey)) s3Service.delete(oldAvatar);
             profile.setProfileImageUrl(null); // enforce avatar_key_exclusive DB constraint
             s3Service.delete(req.getAvatarKey()); // delete pending copy
         }
@@ -111,13 +132,12 @@ public class ProfileService {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                         "Cover image not yet uploaded to S3");
             }
-            if (profile.getCoverKey() != null) {
-                s3Service.delete(profile.getCoverKey());
-            }
+            String oldCover = profile.getCoverKey();
             String filename = req.getCoverKey().substring(req.getCoverKey().lastIndexOf('/') + 1);
             String finalKey = folder + "/" + filename;
             s3Service.copy(req.getCoverKey(), finalKey);
             profile.setCoverKey(finalKey);
+            if (oldCover != null && !oldCover.equals(finalKey)) s3Service.delete(oldCover);
             s3Service.delete(req.getCoverKey()); // delete pending copy
         }
 
@@ -232,6 +252,9 @@ public class ProfileService {
         if (req.getNotesPermission() != null)          profile.setNotesPermission(req.getNotesPermission());
         if (req.getSignalCommentsPermission() != null) profile.setSignalCommentsPermission(req.getSignalCommentsPermission());
         if (req.getAllowMessages() != null)             profile.setAllowMessages(req.getAllowMessages());
+        if (req.getPostCommentsPermission() != null)   profile.setPostCommentsPermission(req.getPostCommentsPermission());
+        if (req.getMentionsPermission() != null)       profile.setMentionsPermission(req.getMentionsPermission());
+        if (req.getConnectionsVisibility() != null)    profile.setConnectionsVisibility(req.getConnectionsVisibility());
     }
 
     /**
@@ -255,6 +278,7 @@ public class ProfileService {
                 p.isShowTradingActivity(), p.isShowTradeHistory(), p.isShowOnlineStatus(),
                 p.isShowInLeaderboard(), p.isAllowFollowers(), p.isAllowCopyTrading(),
                 p.getNotesPermission(), p.getSignalCommentsPermission(), p.getAllowMessages(),
+                p.getPostCommentsPermission(), p.getMentionsPermission(), p.getConnectionsVisibility(),
                 p.getCreatedAt(), p.getUpdatedAt()
         );
     }

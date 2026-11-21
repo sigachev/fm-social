@@ -218,6 +218,28 @@ class CommentServiceTest {
         org.mockito.Mockito.verify(commentRepository, org.mockito.Mockito.never()).save(org.mockito.ArgumentMatchers.any());
     }
 
+    @Test
+    @DisplayName("comments on a post follow its author's comment permission")
+    void createComment_postCommentsFollowTheAuthorsPermission() {
+        var viewer = org.mockito.Mockito.mock(com.finmates.social.access.AudienceService.Viewer.class);
+        org.mockito.Mockito.when(audience.viewer(7L)).thenReturn(viewer);
+        com.finmates.social.post.Post post = new com.finmates.social.post.Post();
+        post.setAuthorId(9L);
+        org.mockito.Mockito.when(postRepository.findById(5L)).thenReturn(java.util.Optional.of(post));
+        org.mockito.Mockito.when(viewer.canSee(post)).thenReturn(true);
+        var author = new com.finmates.social.profile.Profile();
+        author.setPostCommentsPermission(com.finmates.social.profile.PermissionLevel.MATES);
+        org.mockito.Mockito.when(viewer.profile(9L)).thenReturn(java.util.Optional.of(author));
+        org.mockito.Mockito.when(viewer.allows(9L, com.finmates.social.access.AudienceService.Level.MATES)).thenReturn(false);
+        CommentCreateRequest r = new CommentCreateRequest();
+        r.setTargetType(CommentTargetType.POST);
+        r.setTargetId(5L);
+        r.setContent("hi");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.createComment(7L, "alice", r))
+                .isInstanceOf(com.finmates.social.common.exception.ForbiddenActionException.class)
+                .hasMessageContaining("Only their mates can comment");
+    }
+
     private CommentCreateRequest assetCreateRequest(String content, Long parentId) {
         CommentCreateRequest r = new CommentCreateRequest();
         r.setTargetType(CommentTargetType.ASSET);

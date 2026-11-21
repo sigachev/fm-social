@@ -89,4 +89,8 @@ public class ProfileUpdateRequest {
     private PermissionLevel signalCommentsPermission;
 
     private AllowMessages allowMessages;
+
+    private PermissionLevel postCommentsPermission;
+    private PermissionLevel mentionsPermission;
+    private PermissionLevel connectionsVisibility;
 }

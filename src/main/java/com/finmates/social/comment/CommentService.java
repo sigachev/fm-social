@@ -60,6 +60,7 @@ public class CommentService {
             }
         }
         requireCanSee(authorId, req.getTargetType(), req.getTargetId());
+        requireCanComment(authorId, req.getTargetType(), req.getTargetId());
         Comment comment = new Comment();
         comment.setAuthorId(authorId);
         comment.setAuthorUsername(authorUsername);
@@ -92,6 +93,22 @@ public class CommentService {
      * Comments are visible to whoever can see what they are on: the post (its audience and its author's account) or
      * the portfolio (its owner's portfolio audience). Token comments are public. 404 otherwise, so nothing leaks.
      */
+    /**
+     * Writing on someone's portfolio ("notes") also needs their notes permission: Everyone, Mates or Off (only the
+     * owner). Posts and tokens take comments from anyone who can see them.
+     */
+    void requireCanComment(Long authorId, CommentTargetType type, Long targetId) {
+        if (type != CommentTargetType.PORTFOLIO || targetId == null) return;
+        var viewer = audience.viewer(authorId);
+        var level = viewer.profile(targetId).map(p -> com.finmates.social.access.AudienceService.of(p.getNotesPermission()))
+                .orElse(com.finmates.social.access.AudienceService.Level.ONLY_ME);
+        if (!viewer.allows(targetId, level)) {
+            throw new com.finmates.social.common.exception.ForbiddenActionException(
+                    level == com.finmates.social.access.AudienceService.Level.MATES
+                            ? "Only their mates can leave notes here" : "They've turned off notes on their portfolio");
+        }
+    }
+
     public void requireCanSee(Long viewerId, CommentTargetType type, Long targetId) {
         if (type == null) return;
         var viewer = audience.viewer(viewerId);

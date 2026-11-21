@@ -198,6 +198,26 @@ class CommentServiceTest {
         org.mockito.Mockito.verify(commentRepository, org.mockito.Mockito.never()).save(org.mockito.ArgumentMatchers.any());
     }
 
+    @Test
+    @DisplayName("notes on a portfolio follow the owner's notes permission")
+    void createComment_portfolioNotesFollowTheOwnersPermission() {
+        var viewer = org.mockito.Mockito.mock(com.finmates.social.access.AudienceService.Viewer.class);
+        org.mockito.Mockito.when(audience.viewer(7L)).thenReturn(viewer);
+        org.mockito.Mockito.when(viewer.canSeePortfolio(9L)).thenReturn(true);
+        var owner = new com.finmates.social.profile.Profile();
+        owner.setNotesPermission(com.finmates.social.profile.PermissionLevel.DISABLED);
+        org.mockito.Mockito.when(viewer.profile(9L)).thenReturn(java.util.Optional.of(owner));
+        org.mockito.Mockito.when(viewer.allows(9L, com.finmates.social.access.AudienceService.Level.ONLY_ME)).thenReturn(false);
+        CommentCreateRequest r = new CommentCreateRequest();
+        r.setTargetType(CommentTargetType.PORTFOLIO);
+        r.setTargetId(9L);
+        r.setContent("nice");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.createComment(7L, "alice", r))
+                .isInstanceOf(com.finmates.social.common.exception.ForbiddenActionException.class)
+                .hasMessageContaining("turned off notes");
+        org.mockito.Mockito.verify(commentRepository, org.mockito.Mockito.never()).save(org.mockito.ArgumentMatchers.any());
+    }
+
     private CommentCreateRequest assetCreateRequest(String content, Long parentId) {
         CommentCreateRequest r = new CommentCreateRequest();
         r.setTargetType(CommentTargetType.ASSET);

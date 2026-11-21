@@ -74,6 +74,12 @@ public class UserLookupCache {
         byId.invalidate(userId);
     }
 
+    /** After a username change: forget the user by id and both names. */
+    public void invalidate(Long userId, String... usernames) {
+        byId.invalidate(userId);
+        for (String u : usernames) if (u != null) byUsername.invalidate(u.toLowerCase());
+    }
+
     @SuppressWarnings("unchecked")
     private Optional<UserSummary> fetchById(Long userId) {
         try {

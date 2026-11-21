@@ -121,7 +121,7 @@ public class ProfileMoneyController {
                 }
             }
             if (!access.positions()) {
-                o.remove(java.util.List.of("topHoldings", "lpUsd", "walletValues"));
+                o.remove(java.util.List.of("topHoldings", "lpUsd", "walletValues", "mix"));
             }
         }
         return new MoneyResponse(userId, owner, access, hidden, sum,

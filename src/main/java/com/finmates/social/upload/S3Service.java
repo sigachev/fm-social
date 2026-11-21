@@ -35,6 +35,28 @@ public class S3Service {
     }
 
     /**
+     * On startup, checks that the configured key can reach the bucket and logs S3's answer,
+     * so a refused key (deactivated, quarantined, wrong permissions) shows in the logs at once.
+     */
+    @org.springframework.context.event.EventListener(org.springframework.boot.context.event.ApplicationReadyEvent.class)
+    public void checkAccess() {
+        try {
+            // Same permission uploads need; _pending/ is swept by the bucket's lifecycle rule anyway.
+            String key = "posts/_pending/healthcheck.txt";
+            s3Client.putObject(PutObjectRequest.builder().bucket(bucket).key(key).contentType("text/plain").build(),
+                    software.amazon.awssdk.core.sync.RequestBody.fromString("ok"));
+            delete(key);
+            log.info("S3 check: can write to bucket {} with the configured key", bucket);
+        } catch (S3Exception e) {
+            log.error("S3 check FAILED for bucket {}: HTTP {} {} - {}", bucket, e.statusCode(),
+                    e.awsErrorDetails() != null ? e.awsErrorDetails().errorCode() : "?",
+                    e.awsErrorDetails() != null ? e.awsErrorDetails().errorMessage() : e.getMessage());
+        } catch (SdkException e) {
+            log.error("S3 check FAILED for bucket {}: {}", bucket, e.getMessage());
+        }
+    }
+
+    /**
      * Creates a presigned PUT URL for direct client-to-S3 upload.
      * Key path: {folder}/_pending/user{userId}/{uuid}.{extension}
      */

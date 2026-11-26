@@ -35,7 +35,8 @@ public class NotificationService {
             "MY_SIGNALS", java.util.Set.of("MY_SIGNAL_HIT", "MY_SIGNAL_STOPPED", "MY_SIGNAL_EXPIRED", "SIGNAL_ENDING"),
             "MESSAGES", java.util.Set.of("MESSAGE", "MESSAGE_REQUEST"),
             "PRICE_ALERTS", java.util.Set.of("PRICE_ALERT"),
-            "LIQUIDITY", java.util.Set.of("LP_NEAR_EDGE", "LP_OUT_OF_RANGE", "LP_BACK_IN_RANGE"),
+            "LIQUIDITY", java.util.Set.of("LP_NEAR_EDGE", "LP_OUT_OF_RANGE", "LP_BACK_IN_RANGE",
+                    "LP_REBALANCE_READY", "LP_REBALANCED", "LP_REBALANCE_FAILED"),
             "DIGEST", java.util.Set.of("DIGEST"),
             "REPLIES", java.util.Set.of("COMMENT_REPLY", "COMMENT_ON_POST", "MENTION", "PORTFOLIO_NOTE"),
             "REACTIONS", java.util.Set.of("REACTION"));
